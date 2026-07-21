@@ -1,0 +1,67 @@
+# MVP 执行总表
+
+- 状态：进行中
+- 阶段：Ubuntu MVP
+- 更新时间：2026-07-22
+- 目标：把现有产品、架构和 RPC 文档转成可执行任务
+
+## 已确定的实现边界
+
+- [x] 首发平台为 Ubuntu / Linux。
+- [x] 技术栈使用 Electron、React、TypeScript。
+- [x] Agent 能力直接复用 OMP RPC。
+- [x] MVP 只保留一个活动 Workspace 和一个长期 OMP RPC 进程。
+- [x] Session 通过 OMP 的会话能力切换，不为每个会话启动进程。
+- [x] Browser Use、Computer Use、多窗口和插件市场不进入 MVP。
+- [x] 不 Fork OMP，不新增第二套 Agent 协议，不解析 TUI 输出。
+
+## 执行顺序
+
+- [ ] [MVP-01：Electron 工程骨架](./01-electron-project-scaffold.md)
+- [ ] [MVP-02：OMP RPC 与 IPC 主链路](./02-omp-rpc-runtime-and-ipc.md)
+- [ ] [MVP-03：流式对话与执行轨迹](./03-streaming-conversation-and-run-trace.md)
+- [ ] [MVP-04：Workspace、Session 与上下文引用](./04-workspace-session-and-context.md)
+- [ ] [MVP-05：文件树、预览与 Diff](./05-files-context-and-diff.md)
+- [ ] [MVP-06：Terminal、环境与代理](./06-terminal-environment-and-proxy.md)
+- [ ] [MVP-07：Ubuntu 打包与 MVP 验收](./07-ubuntu-packaging-and-acceptance.md)
+
+## 依赖关系
+
+```text
+MVP-01
+  ├─ MVP-02 ─ MVP-03 ─ MVP-04
+  ├─ MVP-05
+  └─ MVP-06
+
+MVP-02 + MVP-03 + MVP-04 + MVP-05 + MVP-06
+  └─ MVP-07
+```
+
+## MVP 总体验收
+
+- [ ] 应用可以在 Ubuntu 启动和退出。
+- [ ] 可以选择 Workspace，并以该目录启动 OMP RPC。
+- [ ] 可以发送 Prompt，查看流式文本、Thinking 和 Tool Call。
+- [ ] 回复完成后，执行过程自动折叠，最终回答保持突出。
+- [ ] 可以停止、Steer 和 Follow-up。
+- [ ] 可以创建、切换和恢复 Session。
+- [ ] 可以浏览文件、预览文本、保存简单修改并查看 Diff。
+- [ ] 可以打开内置 Terminal，且与 OMP 使用同一环境配置。
+- [ ] 可以配置应用级代理，不依赖系统全局代理。
+- [ ] 安装包、空闲资源和首屏体积不超过架构文档中的回归预算。
+
+## 维护规则
+
+- 每完成一个勾选项，立即更新对应 TODO。
+- 发现协议或产品冲突时，先更新项目文档，再修改 TODO。
+- TODO 只记录可执行动作，不重复复制产品说明。
+- 一个 TODO 的任务和验收项全部完成后，移入 `TODO/done/`。
+- 未验证的项目不得勾选。
+
+## 参考
+
+- `docs/product-spec.md`
+- `docs/desktop-architecture.md`
+- `docs/OMP_RPC.md`
+- `docs/desktop-ui-implementation-and-reference-workflow.md`
+- `UI/16341.png`
