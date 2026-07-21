@@ -42,3 +42,12 @@
 - 没有验证过的结果必须明确说明，不能宣称已通过。
 - 提交、推送、创建 Tag 和发布 Release 是不同操作，不能相互代表授权。
 - 只有用户明确要求时，才能推送代码、创建 Tag 或发布 Release。
+
+## 6. 外部参考项目
+
+- Desktop UI 和参考仓库的使用规则见 `docs/desktop-ui-implementation-and-reference-workflow.md`。
+- 外部仓库应放在当前仓库之外，例如 `../omp-references/`。
+- 外部仓库视为只读，只检索当前任务所需的文件。
+- `AGENTS.md` 只提供精确路径和用途，不复制大段外部源码。
+- 不把外部仓库加入当前 Workspace、Git Submodule 或提交历史。
+- 复用最小组件和接口，不复制完整架构。
