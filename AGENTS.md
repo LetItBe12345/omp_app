@@ -13,6 +13,7 @@
 
 - 回复或修改前，先检索相关代码、配置和文档。
 - 动手前先理解现有实现，只修改完成当前任务所需的部分。
+- 实现或修改 Desktop UI 前，必须先查看 `UI/16341.png`，并对照 `docs/product-spec.md`。
 - 优先复用仓库现有代码和成熟的开源实现。
 - 优先最简单、可验证的实现，避免过度设计。
 - 不为极少发生的边界情况增加大量备用逻辑。
@@ -43,10 +44,21 @@
 - 提交、推送、创建 Tag 和发布 Release 是不同操作，不能相互代表授权。
 - 只有用户明确要求时，才能推送代码、创建 Tag 或发布 Release。
 
-## 6. 外部参考项目
+## 6. 项目索引
+
+- 产品定位、MVP 范围和界面规则见 `docs/product-spec.md`。
+- Desktop 分层、技术选型和性能原则见 `docs/desktop-architecture.md`。
+- OMP RPC 能力和命令索引见 `docs/OMP_RPC.md`。
+- OMP 二进制位于 `runtime/omp`；配置模型凭据后，使用 `runtime/omp --mode rpc` 启动，使用 `node scripts/rpc-smoke.mjs` 验证。
+- 当前 Desktop UI 视觉参考见 `UI/16341.png`；布局和交互以产品文档为准。
+
+## 7. 外部参考项目
 
 - Desktop UI 和参考仓库的使用规则见 `docs/desktop-ui-implementation-and-reference-workflow.md`。
-- 外部仓库应放在当前仓库之外，例如 `../omp-references/`。
+- OpenCode：`../omp-references/opencode`；重点看 `packages/desktop/` 和 `packages/session-ui/`。
+- assistant-ui：`../omp-references/assistant-ui`；重点看 `packages/react/` 和 `packages/ui/`。
+- ohmypi-craft：`../omp-references/ohmypi-craft`；重点看 `apps/electron/` 和 `packages/core/`。
+- Oh My Pi：`../omp-references/oh-my-pi`；重点看 `docs/rpc.md`、`packages/coding-agent/`、`packages/wire/` 和 `packages/collab-web/`。
 - 外部仓库视为只读，只检索当前任务所需的文件。
 - `AGENTS.md` 只提供精确路径和用途，不复制大段外部源码。
 - 不把外部仓库加入当前 Workspace、Git Submodule 或提交历史。
