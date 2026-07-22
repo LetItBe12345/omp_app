@@ -63,7 +63,6 @@ else
 
   weston \
     --backend=headless-backend.so \
-    --renderer=pixman \
     --socket="$WAYLAND_DISPLAY" \
     --idle-time=0 \
     --log="$artifact_dir/weston.log" &

@@ -120,6 +120,17 @@ jobs:
       - name: Build application
         run: pnpm build
 
+      - name: Configure Electron sandbox
+        shell: bash
+        run: |
+          set -euo pipefail
+          electron_dir="$(dirname "$(node -p "require('electron')")")"
+          sandbox_path="$electron_dir/chrome-sandbox"
+          test -f "$sandbox_path"
+          sudo chown root:root "$sandbox_path"
+          sudo chmod 4755 "$sandbox_path"
+          stat -c '%U:%G %a %n' "$sandbox_path"
+
       - name: Install X11 test dependencies
         if: matrix.display == 'x11'
         run: |
