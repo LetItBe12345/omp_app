@@ -56,8 +56,7 @@ async function finishSmoke(): Promise<void> {
       await writeFile(screenshotPath, image.toPNG())
       log.info('Smoke 截图已保存', { screenshotPath })
     }
-    process.stdout.write('OMP_SMOKE_READY\n')
-    setTimeout(() => app.quit(), 100)
+    process.stdout.write('OMP_SMOKE_READY\n', () => app.exit(0))
   } catch (error) {
     log.error('Smoke 收尾失败', error)
     app.exit(1)
