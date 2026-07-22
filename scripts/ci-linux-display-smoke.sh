@@ -59,6 +59,7 @@ else
   export XDG_RUNTIME_DIR="$artifact_dir/xdg-runtime"
   export WAYLAND_DISPLAY=wayland-ci
   export OMP_SMOKE_SOFTWARE_RENDERING=true
+  export OMP_SMOKE_TERMINATE_ON_READY=true
   mkdir -p "$XDG_RUNTIME_DIR"
   chmod 700 "$XDG_RUNTIME_DIR"
 

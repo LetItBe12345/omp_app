@@ -9,6 +9,7 @@ await access('out/main/index.js', constants.R_OK)
 const useXvfb = process.platform === 'linux' && !process.env.DISPLAY
 const displayServer = process.env.OMP_DISPLAY_SERVER
 const softwareRendering = process.env.OMP_SMOKE_SOFTWARE_RENDERING === 'true'
+const terminateOnReady = process.env.OMP_SMOKE_TERMINATE_ON_READY === 'true'
 
 if (displayServer && !['x11', 'wayland'].includes(displayServer)) {
   throw new Error(`不支持的 OMP_DISPLAY_SERVER：${displayServer}`)
@@ -45,7 +46,7 @@ const args = displayServer
     : ['out/main/index.js', '--smoke']
 
 console.log(
-  `Electron smoke 环境：arch=${process.arch} display=${displayServer ?? (useXvfb ? 'x11-xvfb' : 'auto')} rendering=${softwareRendering ? 'software' : 'default'}`
+  `Electron smoke 环境：arch=${process.arch} display=${displayServer ?? (useXvfb ? 'x11-xvfb' : 'auto')} rendering=${softwareRendering ? 'software' : 'default'} shutdown=${terminateOnReady ? 'forced-after-ready' : 'normal'}`
 )
 
 const child = spawn(command, args, {
@@ -58,6 +59,7 @@ const child = spawn(command, args, {
 })
 
 let rendererReady = false
+let terminatedAfterReady = false
 let stdout = ''
 
 function terminateChild() {
@@ -77,7 +79,13 @@ child.stdout.on('data', (chunk) => {
   const output = String(chunk)
   stdout += output
   process.stdout.write(output)
-  if (stdout.includes('OMP_SMOKE_READY')) rendererReady = true
+  if (!rendererReady && stdout.includes('OMP_SMOKE_READY')) {
+    rendererReady = true
+    if (terminateOnReady) {
+      terminatedAfterReady = true
+      terminateChild()
+    }
+  }
 })
 
 child.stderr.on('data', (chunk) => process.stderr.write(chunk))
@@ -96,12 +104,14 @@ child.on('error', (error) => {
 
 child.on('exit', (code, signal) => {
   clearTimeout(timeout)
-  if (code !== 0 || !rendererReady) {
+  const expectedForcedExit = terminatedAfterReady && signal === 'SIGKILL'
+  if ((!expectedForcedExit && code !== 0) || !rendererReady) {
     console.error(
       `Electron smoke 失败：code=${String(code)} signal=${String(signal)}`
     )
     process.exitCode = 1
     return
   }
+  if (expectedForcedExit) console.log('Electron smoke 已在成功标记后主动终止')
   console.log('Electron smoke 通过')
 })
