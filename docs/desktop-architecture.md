@@ -90,10 +90,13 @@ Preload 是受控接口层。
 
 ```ts
 window.omp.prompt(message)
-window.omp.abort()
-window.omp.switchSession(path)
+window.omp.followUp(message)
+window.omp.stopCurrentRun()
+window.omp.switchSession(sessionId)
 window.omp.onEvent(listener)
 ```
+
+Preload 使用命令专用方法，不暴露通用 `rpc(command)`，也不向普通 Renderer 暴露 RPC `bash`、Host Tool 或 Host URI。
 
 Preload 不保存业务状态，也不运行复杂逻辑。
 
@@ -234,6 +237,7 @@ Main 只负责转发和生命周期管理。
 - 当前工作目录
 - 系统级配置
 - Terminal 和 Browser 实例
+- 尚未完成的 Extension UI 请求
 
 ### OMP Runtime 持有
 
@@ -248,6 +252,8 @@ Main 只负责转发和生命周期管理。
 不要在三处重复维护同一份 Agent 状态。
 
 Renderer 需要恢复状态时，应向 OMP 请求 `get_state` 或 `get_messages`。
+
+Follow-up 队列只由 OMP Runtime 在内存中持有。Desktop 不保存恢复副本；Runtime 重启或崩溃时，未执行的 Follow-up 可以丢失。
 
 ## 7. 进程模型
 
@@ -331,6 +337,7 @@ RPC 本身不是主要瓶颈。
 ```text
 创建窗口
 → 显示基础 UI
+→ 恢复或选择有效 Workspace
 → 启动 OMP
 → 等待 ready
 → 用户操作时再加载 Terminal、Browser 和大型组件
@@ -361,6 +368,8 @@ OMP message_update
 工具进度也要限频。
 
 不要将完整消息列表反复通过 IPC 发送。
+
+消息开始/结束、工具开始/结束、错误和 Extension UI 请求不做延迟合并。单条 RPC JSONL 帧设置 16 MiB 硬上限，防止异常输出耗尽 Main 内存。
 
 ### 9.3 只更新当前消息
 
@@ -483,6 +492,7 @@ CI 应记录每次构建的变化趋势。
 - Session 创建、切换和恢复
 - 同一时间只允许当前 Session 生成
 - 基础文件树
+- 文件和目录上下文引用
 - 基础设置
 - OMP Runtime 环境与网络配置
 
@@ -491,6 +501,7 @@ CI 应记录每次构建的变化趋势。
 - Changes / Review / Diff
 - 内置 Terminal
 - 内置 Browser
+- 应用内文件打开器、预览和编辑
 - Computer Use
 - 多窗口
 - 插件市场

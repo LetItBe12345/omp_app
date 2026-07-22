@@ -246,7 +246,7 @@ git rev-parse HEAD
 3. 接入最小聊天界面和流式文本。
 4. 实现 Thinking/Tool Trace 的运行时展开和完成后折叠。
 5. 接入会话列表和项目工作目录。
-6. 接入文件树、文件读取和简单编辑。
+6. 接入文件树、搜索和文件/目录上下文引用。
 7. MVP 之后接入 Changes / Review / Diff 和多标签 Terminal。
 8. 最后处理内置浏览器、Browser Use 和 Computer Use。
 

@@ -100,6 +100,8 @@ Desktop 启动 `omp --mode rpc` 时通过子进程 `env` 传入 PATH、普通环
 
 环境或代理发生变化时，Desktop 需要重启 OMP Runtime，再恢复当前 Session。
 
+MVP 的普通 Renderer 不暴露 `bash`。MVP 也不调用 `set_host_tools` 或 `set_host_uri_schemes`；如果意外收到 Host Tool 或 Host URI 请求，Main 明确返回“不支持”，不能静默悬挂。
+
 ---
 
 ## 三、`get_state` 可以读到什么
@@ -193,6 +195,10 @@ OMP Extension 可以请求宿主显示：
 - `cancel`：取消之前的交互
 
 Electron 返回选择结果、确认结果、输入内容或取消状态。
+
+OMP Desktop MVP 只桥接 `select`、`confirm`、`input`、`editor`、`cancel` 和 `open_url`。Renderer 重载时，Main 重新发送尚未回答的交互请求；应用退出、Runtime 重启或超时时返回取消。
+
+`open_url` 只允许 HTTP/HTTPS，并直接交给系统默认浏览器。聊天中的网页链接和有效本地路径通过 `Ctrl+点击` 分别交给系统浏览器和系统文件管理器；不实现内置浏览器或聊天内文件打开器。
 
 不过，TUI 专属组件无法直接复用：
 
@@ -315,6 +321,8 @@ available_commands_update
 
 2. **正在生成时再次发送 Prompt，必须指定 `steer` 或 `followUp`。**
 
+   OMP Desktop MVP 的普通发送固定使用 `follow_up` 和 `one-at-a-time`，不向界面提供 Steer。Follow-up 在执行前只存在于 Runtime 内存，尚未进入 Session 历史；Runtime 重启时可以丢失。
+
 3. **普通命令串行执行，但 `bash` 并发执行。**
    返回顺序不固定，必须按 `id` 匹配。
 
@@ -350,8 +358,9 @@ Electron Main 负责：
 - 维护请求 ID
 - 解析事件
 - 管理 Session 对应的进程
-- 执行 Host Tools
 - 将安全的事件转发给 Renderer
+
+Host Tools 是 RPC 的后续扩展能力，不进入 MVP。
 
 **MVP 不要 Fork OMP。**
 
@@ -359,10 +368,10 @@ Electron Main 负责：
 
 1. 对话和流式输出
 2. 工具调用卡片
-3. Stop、Steer、Follow-up
+3. Stop 和逐条 Follow-up；MVP 不提供 Steer
 4. 模型和 Thinking 选择
 5. Session 新建、切换、历史
-6. Extension UI
+6. 核心 Extension UI；不注册 Host Tool 或 Host URI
 7. 一个 OMP 进程对应一个活跃 Workspace
 
 现有 RPC 已经覆盖这些核心需求。真正缺的是 Electron UI 层，不是 Runtime 能力。
