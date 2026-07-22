@@ -75,9 +75,9 @@
 - [ ] OMP 成功进入 ready。
 - [ ] 新建 Session 并发送 Prompt。
 - [ ] 查看流式文本、Thinking 和 Tool Call。
-- [ ] 测试 Stop、Steer、Follow-up 和 Permission。
+- [ ] 测试鼠标 Stop、`Ctrl+C`、逐条 Follow-up、队列清空和 Permission。
 - [ ] 切换 Session 并恢复历史。
-- [ ] 打开文件并保存简单修改。
+- [ ] 浏览和搜索文件，将文件或目录加入上下文，并用 `Ctrl+点击` 在系统文件管理器中定位。
 - [ ] 在不开启系统全局代理和 TUN 的条件下，配置 Runtime 手动代理并测试模型请求。
 - [ ] 通过 RPC `bash` 验证命令继承 Runtime 的 PATH、普通环境变量和代理变量。
 - [ ] 切换为不使用代理，重启 Runtime 后确认代理变量已移除。

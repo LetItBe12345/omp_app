@@ -22,7 +22,7 @@
 - [ ] [MVP-02：OMP RPC 与 IPC 主链路](./02-omp-rpc-runtime-and-ipc.md)
 - [ ] [MVP-03：流式对话与执行轨迹](./03-streaming-conversation-and-run-trace.md)
 - [ ] [MVP-04：Workspace、Session 与上下文引用](./04-workspace-session-and-context.md)
-- [ ] [MVP-05：文件树、预览与编辑](./05-files-preview-and-edit.md)
+- [ ] [MVP-05：文件树与上下文引用](./05-files-preview-and-edit.md)
 - [ ] [MVP-06：OMP Runtime 环境与网络](./06-runtime-environment-and-network.md)
 - [ ] [MVP-07：Ubuntu 打包与 MVP 验收](./07-ubuntu-packaging-and-acceptance.md)
 
@@ -50,9 +50,9 @@ MVP-02 + MVP-03 + MVP-04 + MVP-05 + MVP-06
 - [ ] 可以选择 Workspace，并以该目录启动 OMP RPC。
 - [ ] 可以发送 Prompt，查看流式文本、Thinking 和 Tool Call。
 - [ ] 回复完成后，执行过程自动折叠，最终回答保持突出。
-- [ ] 可以停止、Steer 和 Follow-up。
+- [ ] 可以停止当前执行链，并按顺序处理 Follow-up。
 - [ ] 可以创建、切换和恢复 Session。
-- [ ] 可以浏览文件、预览文本并保存简单修改。
+- [ ] 可以浏览和搜索文件，并将文件或目录加入上下文。
 - [ ] 可以控制 OMP Runtime 使用或不使用代理，不依赖系统全局代理。
 - [ ] 安装包、空闲资源和首屏体积不超过架构文档中的回归预算。
 

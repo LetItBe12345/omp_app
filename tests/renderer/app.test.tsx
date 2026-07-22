@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 import { App } from '../../src/renderer/app'
 
 describe('App shell', () => {
@@ -29,6 +29,105 @@ describe('App shell', () => {
     expect(screen.getByRole('button', { name: '新建对话' })).toBeDisabled()
     expect(screen.getByRole('textbox', { name: '任务输入' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
-    expect(screen.getByText('此功能将在后续任务中提供')).toBeInTheDocument()
+    expect(screen.getByText('请先打开 Workspace')).toBeInTheDocument()
+  })
+
+  it('运行中使用 Stop 按钮和 Ctrl+C 停止同一任务', async () => {
+    vi.mocked(window.desktop.getRuntimeState).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        status: 'ready',
+        workspacePath: '/tmp/workspace',
+        sessionId: 'session-1',
+        isStreaming: true,
+        queuedMessageCount: 0
+      }
+    })
+    render(<App />)
+
+    await screen.findByRole('button', { name: '停止' })
+    fireEvent.keyDown(window, { key: 'c', ctrlKey: true })
+
+    await waitFor(() =>
+      expect(window.desktop.stopCurrentRun).toHaveBeenCalledTimes(1)
+    )
+  })
+
+  it('运行中将 Enter 输入发送为 Follow-up，并拒绝 Slash Command', async () => {
+    vi.mocked(window.desktop.getRuntimeState).mockResolvedValue({
+      ok: true,
+      data: {
+        status: 'ready',
+        workspacePath: '/tmp/workspace',
+        sessionId: 'session-1',
+        isStreaming: true,
+        queuedMessageCount: 0
+      }
+    })
+    render(<App />)
+    const composer = await screen.findByRole('textbox', { name: '任务输入' })
+
+    fireEvent.change(composer, { target: { value: '补充测试' } })
+    fireEvent.keyDown(composer, { key: 'Enter' })
+    await waitFor(() =>
+      expect(window.desktop.followUp).toHaveBeenCalledWith({
+        message: '补充测试'
+      })
+    )
+
+    fireEvent.change(composer, { target: { value: '/compact' } })
+    fireEvent.keyDown(composer, { key: 'Enter' })
+    expect(window.desktop.followUp).toHaveBeenCalledTimes(1)
+    expect(
+      await screen.findByText('任务结束后可执行 Slash Command')
+    ).toBeInTheDocument()
+  })
+
+  it('存在文本选择时 Ctrl+C 保持复制且不触发 Stop', async () => {
+    vi.mocked(window.desktop.getRuntimeState).mockResolvedValue({
+      ok: true,
+      data: {
+        status: 'ready',
+        workspacePath: '/tmp/workspace',
+        sessionId: 'session-1',
+        isStreaming: true,
+        queuedMessageCount: 0
+      }
+    })
+    render(<App />)
+    const composer = await screen.findByRole('textbox', { name: '任务输入' })
+    fireEvent.change(composer, { target: { value: '需要复制' } })
+    ;(composer as HTMLTextAreaElement).setSelectionRange(0, 2)
+    composer.focus()
+
+    fireEvent.keyDown(window, { key: 'c', ctrlKey: true })
+    expect(window.desktop.stopCurrentRun).not.toHaveBeenCalled()
+  })
+
+  it('点击 Stop 后立即禁用重复操作', async () => {
+    vi.mocked(window.desktop.getRuntimeState).mockResolvedValue({
+      ok: true,
+      data: {
+        status: 'ready',
+        workspacePath: '/tmp/workspace',
+        sessionId: 'session-1',
+        isStreaming: true,
+        queuedMessageCount: 0
+      }
+    })
+    let finishStop: ((value: { ok: true; data: null }) => void) | undefined
+    vi.mocked(window.desktop.stopCurrentRun).mockReturnValue(
+      new Promise((resolve) => {
+        finishStop = resolve
+      })
+    )
+    render(<App />)
+    const stopButton = await screen.findByRole('button', { name: '停止' })
+
+    fireEvent.click(stopButton)
+    await waitFor(() => expect(stopButton).toBeDisabled())
+    fireEvent.click(stopButton)
+    expect(window.desktop.stopCurrentRun).toHaveBeenCalledTimes(1)
+    finishStop?.({ ok: true, data: null })
   })
 })

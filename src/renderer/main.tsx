@@ -44,6 +44,8 @@ createRoot(document.getElementById('root')!).render(
 )
 
 requestAnimationFrame(() => {
-  reportPerformance('renderer_ready')
-  window.desktop.rendererReady()
+  requestAnimationFrame(() => {
+    reportPerformance('renderer_ready')
+    window.desktop.rendererReady()
+  })
 })

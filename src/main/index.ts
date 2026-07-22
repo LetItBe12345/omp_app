@@ -1,21 +1,95 @@
-import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
-import { writeFile } from 'node:fs/promises'
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { PerformanceEntry, RendererLogEntry } from '../shared/desktop-api'
 import { IPC_CHANNELS } from '../shared/desktop-api'
 import { validateExternalUrl } from './external-url'
 import { initializeLogger, log, recordMainPerformance } from './logger'
+import { registerRuntimeIpc } from './runtime-ipc'
+import { RuntimeDiagnostics } from './runtime-diagnostics'
+import { RuntimeSupervisor } from './runtime-supervisor'
 import { installNavigationSecurity, installSessionSecurity } from './security'
 
 const development = Boolean(process.env['ELECTRON_RENDERER_URL'])
 const smokeMode = process.argv.includes('--smoke')
 let mainWindow: BrowserWindow | null = null
 let smokeFinishing = false
+let shutdownStarted = false
 
 app.setName('OMP Desktop')
 app.setPath('userData', join(app.getPath('appData'), 'OMP Desktop'))
 app.setAppLogsPath()
 initializeLogger()
+
+const runtimePath = app.isPackaged
+  ? join(process.resourcesPath, 'runtime', 'omp')
+  : join(app.getAppPath(), 'runtime', 'omp')
+const runtimeSupervisor = new RuntimeSupervisor({
+  runtimePath,
+  diagnostics: new RuntimeDiagnostics(join(app.getPath('logs'), 'runtime.log'))
+})
+const runtimeStatePath = join(app.getPath('userData'), 'runtime-state.json')
+let persistedRuntimeState = ''
+
+type PersistedRuntimeState = {
+  workspacePath: string
+  sessionPath?: string
+}
+
+async function persistRuntimeState(
+  state: PersistedRuntimeState
+): Promise<void> {
+  const serialized = JSON.stringify(state)
+  if (serialized === persistedRuntimeState) return
+  persistedRuntimeState = serialized
+  await writeFile(runtimeStatePath, serialized, {
+    encoding: 'utf8',
+    mode: 0o600
+  })
+}
+
+async function restoreRuntimeState(): Promise<void> {
+  const state = await readFile(runtimeStatePath, 'utf8')
+    .then((value) => JSON.parse(value) as unknown)
+    .catch(() => null)
+  if (!state || typeof state !== 'object' || Array.isArray(state)) return
+  const workspacePath = (state as Record<string, unknown>)['workspacePath']
+  const sessionPath = (state as Record<string, unknown>)['sessionPath']
+  if (typeof workspacePath !== 'string') return
+
+  try {
+    await runtimeSupervisor.start(workspacePath)
+    if (typeof sessionPath === 'string') {
+      try {
+        await runtimeSupervisor.restoreSessionPath(sessionPath)
+      } catch (error) {
+        log.warn('上次 Session 不可用，改为新建 Session', error)
+        await runtimeSupervisor.newSession()
+        const window = mainWindow
+        if (window && !window.isDestroyed()) {
+          void dialog.showMessageBox(window, {
+            type: 'info',
+            title: 'OMP Desktop',
+            message: '上次会话不可用，已新建会话。',
+            buttons: ['知道了'],
+            defaultId: 0,
+            noLink: true
+          })
+        }
+      }
+    }
+  } catch (error) {
+    log.warn('恢复上次 Runtime 状态失败', error)
+  }
+}
+
+runtimeSupervisor.on('snapshot', (snapshot) => {
+  if (!snapshot.workspacePath) return
+  void persistRuntimeState({
+    workspacePath: snapshot.workspacePath,
+    ...(snapshot.sessionPath ? { sessionPath: snapshot.sessionPath } : {})
+  }).catch((error: unknown) => log.error('保存 Runtime 状态失败', error))
+})
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 if (!hasSingleInstanceLock) app.quit()
@@ -52,6 +126,19 @@ async function finishSmoke(): Promise<void> {
   try {
     const screenshotPath = process.env['OMP_SMOKE_SCREENSHOT']
     if (screenshotPath && mainWindow) {
+      const rendererState = (await mainWindow.webContents.executeJavaScript(`({
+        hasAppShell: Boolean(document.querySelector('[data-slot="app-shell"]')),
+        rootHtml: document.getElementById('root')?.innerHTML.slice(0, 1000) ?? '',
+        bodyText: document.body.innerText.slice(0, 500)
+      })`)) as {
+        hasAppShell: boolean
+        rootHtml: string
+        bodyText: string
+      }
+      if (!rendererState.hasAppShell) {
+        log.error('Smoke 未找到应用外壳', rendererState)
+        throw new Error('Renderer 未渲染应用外壳')
+      }
       const image = await mainWindow.webContents.capturePage()
       await writeFile(screenshotPath, image.toPNG())
       log.info('Smoke 截图已保存', { screenshotPath })
@@ -85,6 +172,7 @@ function createWindow(): BrowserWindow {
   })
 
   mainWindow = window
+  let allowWindowClose = false
   recordMainPerformance('window_created')
   installSessionSecurity(window.webContents.session, development)
   installNavigationSecurity(window.webContents)
@@ -131,6 +219,34 @@ function createWindow(): BrowserWindow {
     mainWindow = null
   })
 
+  window.on('close', (event) => {
+    const runtime = runtimeSupervisor.snapshot
+    if (
+      allowWindowClose ||
+      (!runtime.isStreaming && runtime.queuedMessageCount === 0)
+    ) {
+      return
+    }
+
+    event.preventDefault()
+    void dialog
+      .showMessageBox(window, {
+        type: 'warning',
+        title: 'OMP Desktop',
+        message: '任务正在运行，仍要退出吗？',
+        detail: '退出后任务将停止。',
+        buttons: ['继续运行', '退出'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true
+      })
+      .then(({ response }) => {
+        if (response !== 1) return
+        allowWindowClose = true
+        window.destroy()
+      })
+  })
+
   window.webContents.on('before-input-event', (event, input) => {
     if (development && input.type === 'keyDown' && input.key === 'F12') {
       event.preventDefault()
@@ -168,6 +284,12 @@ if (hasSingleInstanceLock) {
     Menu.setApplicationMenu(null)
     registerIpc()
     createWindow()
+    registerRuntimeIpc(
+      runtimeSupervisor,
+      () => mainWindow,
+      process.env['ELECTRON_RENDERER_URL']
+    )
+    if (!smokeMode) void restoreRuntimeState()
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -175,4 +297,11 @@ if (hasSingleInstanceLock) {
   })
 }
 
-app.on('window-all-closed', () => app.quit())
+app.on('window-all-closed', () => {
+  if (shutdownStarted) return
+  shutdownStarted = true
+  void runtimeSupervisor
+    .stop()
+    .catch((error: unknown) => log.error('关闭 Runtime 失败', error))
+    .finally(() => app.quit())
+})
