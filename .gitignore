@@ -1,1 +1,8 @@
+node_modules/
+out/
+dist/
+coverage/
+tests/artifacts/*.png
+.eslintcache
+*.log
 runtime/omp

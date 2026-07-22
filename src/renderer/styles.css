@@ -1,0 +1,100 @@
+@import 'tailwindcss';
+
+:root {
+  color-scheme: light;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    'Noto Sans CJK SC',
+    'Microsoft YaHei',
+    sans-serif;
+  --surface-app: #f4f4f2;
+  --surface-panel: #fafaf9;
+  --surface-main: #ffffff;
+  --surface-selected: #eeeeec;
+  --text-primary: #20201f;
+  --text-secondary: #666662;
+  --text-muted: #92928d;
+  --border: #deded9;
+  --border-subtle: #ebebe7;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--surface-app);
+  user-select: none;
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+.panel-surface {
+  background: var(--surface-panel);
+}
+
+.empty-card {
+  border: 1px dashed var(--border);
+  border-radius: 0.875rem;
+  padding: 1.25rem;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.disabled-control {
+  display: flex;
+  height: 2.25rem;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.625rem;
+  background: white;
+  padding: 0 0.75rem;
+  color: var(--text-secondary);
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.resize-handle {
+  position: relative;
+  width: 1px;
+  background: var(--border-subtle);
+  transition: background-color 120ms ease;
+}
+
+.resize-handle::before {
+  position: absolute;
+  inset: 0 -3px;
+  content: '';
+}
+
+.resize-handle:hover,
+.resize-handle[data-resize-handle-active] {
+  background: #9b9b95;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: #cececa;
+  background-clip: padding-box;
+}
