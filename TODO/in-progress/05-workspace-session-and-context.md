@@ -1,9 +1,9 @@
-# MVP-04：Workspace、Session 与上下文引用
+# MVP-05：Workspace、Session 与上下文引用
 
 - 状态：未开始
 - 优先级：P0
-- 前置任务：MVP-02、MVP-03
-- 后续任务：MVP-07
+- 前置任务：MVP-02、MVP-04
+- 后续任务：MVP-08
 
 ## 目标
 

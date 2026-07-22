@@ -19,35 +19,37 @@
 ## 执行顺序
 
 - [x] [MVP-01：Electron 工程骨架](../done/01-electron-project-scaffold.md)
-- [ ] [MVP-02：OMP RPC 与 IPC 主链路](./02-omp-rpc-runtime-and-ipc.md)
-- [ ] [MVP-03：流式对话与执行轨迹](./03-streaming-conversation-and-run-trace.md)
-- [ ] [MVP-04：Workspace、Session 与上下文引用](./04-workspace-session-and-context.md)
-- [ ] [MVP-05：文件树与上下文引用](./05-files-preview-and-edit.md)
-- [ ] [MVP-06：OMP Runtime 环境与网络](./06-runtime-environment-and-network.md)
-- [ ] [MVP-07：Ubuntu 打包与 MVP 验收](./07-ubuntu-packaging-and-acceptance.md)
+- [x] [MVP-02：OMP RPC 与 IPC 主链路](../done/02-omp-rpc-runtime-and-ipc.md)
+- [ ] [MVP-03：模型授权、Provider 与模型选择](./03-model-authorization-provider-and-selection.md)
+- [ ] [MVP-04：流式对话与执行轨迹](./04-streaming-conversation-and-run-trace.md)
+- [ ] [MVP-05：Workspace、Session 与上下文引用](./05-workspace-session-and-context.md)
+- [ ] [MVP-06：文件树与上下文引用](./06-files-preview-and-edit.md)
+- [ ] [MVP-07：OMP Runtime 环境与网络](./07-runtime-environment-and-network.md)
+- [ ] [MVP-08：Ubuntu 打包与 MVP 验收](./08-ubuntu-packaging-and-acceptance.md)
 
 ## MVP 之后
 
-- [ ] [POST-MVP-01：Changes、Review 与 Diff](./08-changes-review-and-diff.md)
-- [ ] [POST-MVP-02：内置多标签 Terminal](./09-multi-tab-terminal.md)
-- [ ] [POST-MVP-03：多 Session 并行 Runtime](./10-parallel-session-runtimes.md)
+- [ ] [POST-MVP-01：Changes、Review 与 Diff](./09-changes-review-and-diff.md)
+- [ ] [POST-MVP-02：内置多标签 Terminal](./10-multi-tab-terminal.md)
+- [ ] [POST-MVP-03：多 Session 并行 Runtime](./11-parallel-session-runtimes.md)
 
 ## 依赖关系
 
 ```text
 MVP-01
-  ├─ MVP-02 ─ MVP-03 ─ MVP-04
-  ├─ MVP-05
-  └─ MVP-06
-
-MVP-02 + MVP-03 + MVP-04 + MVP-05 + MVP-06
+  ├─ MVP-02 ─ MVP-03 ─ MVP-04 ─ MVP-05
+  ├─ MVP-06
   └─ MVP-07
+
+MVP-02 + MVP-03 + MVP-04 + MVP-05 + MVP-06 + MVP-07
+  └─ MVP-08
 ```
 
 ## MVP 总体验收
 
 - [ ] 应用可以在 Ubuntu 启动和退出。
 - [ ] 可以选择 Workspace，并以该目录启动 OMP RPC。
+- [ ] 首次使用时可以登录 Provider、获取可用模型并选择模型与 Thinking Level。
 - [ ] 可以发送 Prompt，查看流式文本、Thinking 和 Tool Call。
 - [ ] 回复完成后，执行过程自动折叠，最终回答保持突出。
 - [ ] 可以停止当前执行链，并按顺序处理 Follow-up。

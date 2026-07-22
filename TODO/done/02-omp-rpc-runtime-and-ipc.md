@@ -1,9 +1,9 @@
 # MVP-02：OMP RPC 与 IPC 主链路
 
-- 状态：进行中
+- 状态：已完成
 - 优先级：P0
 - 前置任务：MVP-01
-- 后续任务：MVP-03、MVP-04、MVP-07
+- 后续任务：MVP-03、MVP-04、MVP-05、MVP-08
 
 ## 目标
 
@@ -32,7 +32,7 @@ runtime/omp --mode rpc
 - 不新增 WebSocket、gRPC 或 HTTP 服务。
 - 不为每个 Session 启动独立进程。
 - 不在 Renderer 重建 Agent 状态机。
-- 不在本任务解析 Runtime Environment / Network Profile；MVP-06 负责生成最终 `env`。
+- 不在本任务解析 Runtime Environment / Network Profile；MVP-07 负责生成最终 `env`。
 - 不向普通 Renderer 暴露 RPC `bash`、Host Tool 或 Host URI。
 - MVP 不注册 Host Tool 和 Host URI；意外收到对应请求时明确返回“不支持”。
 - 运行中不向界面提供 Steer；再次发送统一使用 Follow-up。
@@ -45,7 +45,7 @@ runtime/omp --mode rpc
 - [x] 先创建并显示窗口；只有恢复或选择出有效 Workspace 后才启动 OMP。
 - [x] 从应用资源中解析并校验 `runtime/omp`。
 - [x] 使用活动 Workspace 作为 `--cwd`，以 `shell: false` 启动 OMP。
-- [x] Runtime Supervisor 接收 MVP-06 已解析的最终 `env`，并原样传入 `spawn`。
+- [x] Runtime Supervisor 接收 MVP-07 已解析的最终 `env`，并原样传入 `spawn`。
 - [x] 启动过程使用 single-flight，防止并发调用产生第二个长期进程。
 - [x] 等待 `ready`，最长 15 秒；未就绪则结束进程并进入 `START_FAILED`。
 - [x] 处于 `starting` 时，用户发送按钮禁用且显示灰色；内部初始化请求等待同一个 ready Promise。
@@ -112,7 +112,7 @@ runtime/omp --mode rpc
 - [x] 同 Session 重载被 Extension 取消、失败或超过 5 秒时，同样重启 Runtime，保证队列被清空。
 - [x] Stop 后把当前被中止的完整用户消息放回原 Session 输入框；覆盖该输入框已有内容。
 - [x] 若正在执行的是 Follow-up，只恢复该条 Follow-up；已完成消息留在历史，尚未执行的 Follow-up 直接清空。
-- [x] 草稿按 Workspace ID + Session ID 持久化，成功发送后清除；MVP-04 接入 Session 删除动作时同步清理对应草稿。
+- [x] 草稿按 Workspace ID + Session ID 持久化，成功发送后清除；MVP-05 接入 Session 删除动作时同步清理对应草稿。
 
 ## 事件、日志与恢复
 
@@ -133,7 +133,7 @@ runtime/omp --mode rpc
 - [x] 禁止 `file:`、`javascript:`、`data:` 和其他自定义协议。
 - [x] Main 和 Preload 提供受控的系统浏览器与文件管理器调用；本地路径必须是已存在的绝对路径，也允许 Workspace 外路径。
 
-聊天内容的路径识别和 `Ctrl+点击` 交互由 MVP-05 接入实际消息与文件树时实现。
+聊天内容的路径识别和 `Ctrl+点击` 交互由 MVP-06 接入实际消息与文件树时实现。
 
 ## Preload 与 IPC
 
@@ -155,7 +155,7 @@ runtime/omp --mode rpc
 - [x] 测试鼠标 Stop、`Ctrl+C`、选中文本复制、队列清空、当前 Prompt 恢复和 5 秒强制重启。
 - [x] 测试应用关闭后没有遗留 OMP 及其子进程。
 - [x] 保留并扩展 `scripts/rpc-smoke.mjs`。
-- [x] 用测试环境变量验证 Runtime `env` 注入；完整 Profile 与 Agent Bash 继承验收由 MVP-06 完成。
+- [x] 用测试环境变量验证 Runtime `env` 注入；完整 Profile 与 Agent Bash 继承验收由 MVP-07 完成。
 
 ## 完成条件
 
@@ -164,7 +164,7 @@ runtime/omp --mode rpc
 - [x] Session 历史可恢复；Renderer 重载不终止正在运行的 Agent。
 - [x] 请求失败、超时、协议错误、进程崩溃和强制 Stop 都有明确、可测试的状态。
 - [x] Stop 在正常路径快速反馈，并能可靠清空当前任务和全部 Follow-up。
-- [ ] RPC smoke test 和相关单元测试通过。
+- [x] RPC smoke test 和相关单元测试通过。
 
 ## 参考
 

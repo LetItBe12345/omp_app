@@ -168,6 +168,7 @@ export class RuntimeSupervisor extends EventEmitter {
     const child = this.#child
     if (!child) {
       this.#setSnapshot({ status: 'stopped', isStreaming: false })
+      await this.#diagnostics.flush()
       return
     }
 
@@ -203,6 +204,7 @@ export class RuntimeSupervisor extends EventEmitter {
       error: undefined
     })
     this.#intentionalStop = false
+    await this.#diagnostics.flush()
   }
 
   async getState(): Promise<RuntimeSnapshot> {

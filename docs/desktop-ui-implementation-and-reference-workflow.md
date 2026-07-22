@@ -126,7 +126,7 @@ Electron
 └── TanStack Virtual（长列表出现时）
 ```
 
-MVP-01 只接入 Tailwind CSS 4、`lucide-react` 和 `react-resizable-panels`。`electron-builder` 在 MVP-07 接入；Radix UI、assistant-ui 和 TanStack Virtual 在首次出现真实需求时再接入。
+MVP-01 只接入 Tailwind CSS 4、`lucide-react` 和 `react-resizable-panels`。`electron-builder` 在 MVP-08 接入；Radix UI、assistant-ui 和 TanStack Virtual 在首次出现真实需求时再接入。
 
 样式边界：
 

@@ -1,9 +1,9 @@
-# MVP-06：OMP Runtime 环境与网络
+# MVP-07：OMP Runtime 环境与网络
 
 - 状态：未开始
 - 优先级：P1
 - 前置任务：MVP-01、MVP-02
-- 后续任务：MVP-07
+- 后续任务：MVP-08
 
 ## 目标
 

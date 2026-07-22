@@ -2,22 +2,24 @@ import { spawn } from 'node:child_process'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RuntimeDiagnostics } from '../../src/main/runtime-diagnostics'
 import { RuntimeSupervisor } from '../../src/main/runtime-supervisor'
 
 describe('RuntimeSupervisor', () => {
   let temporaryDirectory: string
+  let diagnostics: RuntimeDiagnostics
   let supervisor: RuntimeSupervisor
 
   beforeEach(async () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), 'omp-runtime-test-'))
     const fixture = resolve('tests/fixtures/fake-omp.mjs')
+    diagnostics = new RuntimeDiagnostics(
+      join(temporaryDirectory, 'runtime.log')
+    )
     supervisor = new RuntimeSupervisor({
       runtimePath: process.execPath,
-      diagnostics: new RuntimeDiagnostics(
-        join(temporaryDirectory, 'runtime.log')
-      ),
+      diagnostics,
       spawnRuntime: (_executable, args, options) =>
         spawn(process.execPath, [fixture, ...args], {
           ...options,
@@ -40,6 +42,15 @@ describe('RuntimeSupervisor', () => {
       model: 'test/fake-model',
       thinkingLevel: 'medium'
     })
+  })
+
+  it('关闭前刷新 Runtime 诊断日志', async () => {
+    const flush = vi.spyOn(diagnostics, 'flush')
+    await supervisor.start(process.cwd())
+
+    await supervisor.stop()
+
+    expect(flush).toHaveBeenCalledOnce()
   })
 
   it('Stop 恢复当前 Prompt 并清空 Follow-up', async () => {
