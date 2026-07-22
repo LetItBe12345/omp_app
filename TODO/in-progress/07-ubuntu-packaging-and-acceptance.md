@@ -59,10 +59,10 @@
 
 ### 自动化检查
 
-- [ ] CI 执行类型检查。
-- [ ] CI 执行单元测试。
-- [ ] GitHub Hosted Runner 覆盖 Ubuntu 22.04、24.04 的 x64、arm64。
-- [ ] 每个平台和架构分别运行 Xvfb X11 与 Weston headless Wayland smoke，并保存截图和诊断日志。
+- [x] CI 执行类型检查。
+- [x] CI 执行单元测试。
+- [x] GitHub Hosted Runner 覆盖 Ubuntu 22.04、24.04 的 x64、arm64。
+- [x] 每个平台和架构分别运行 Xvfb X11 与 Weston headless Wayland smoke，并保存截图和诊断日志；headless Wayland 使用软件渲染并在成功标记后受控终止，不替代真实 GPU 和优雅退出验收。
 - [ ] CI 执行 RPC smoke test，无法提供真实凭据时使用明确的测试模式。
 - [ ] CI 构建 Linux 安装包。
 - [ ] CI 检查打包产物中是否包含错误平台二进制或开发文件。
