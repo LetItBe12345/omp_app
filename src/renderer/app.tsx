@@ -8,7 +8,13 @@ import {
   Search,
   Settings2
 } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState
+} from 'react'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 import { uiFixture } from '../../tests/fixtures/ui-fixture'
 import type { RuntimeSnapshot } from '../shared/desktop-api'
@@ -215,6 +221,9 @@ function Conversation({
   const [error, setError] = useState<string | null>(null)
   const busy = runtime.isStreaming || runtime.queuedMessageCount > 0
   const ready = runtime.status === 'ready'
+  const busyRef = useRef(busy)
+  const stoppingRef = useRef(stopping)
+  const stopRef = useRef<() => Promise<void>>(async () => undefined)
 
   const stop = async (): Promise<void> => {
     if (!busy || stopping) return
@@ -231,22 +240,28 @@ function Conversation({
     setStopping(false)
   }
 
+  useLayoutEffect(() => {
+    busyRef.current = busy
+    stoppingRef.current = stopping
+    stopRef.current = stop
+  })
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (
-        !busy ||
-        stopping ||
+        !busyRef.current ||
+        stoppingRef.current ||
         event.key.toLowerCase() !== 'c' ||
         !event.ctrlKey
       )
         return
       if (hasTextSelection()) return
       event.preventDefault()
-      void stop()
+      void stopRef.current()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  })
+  }, [])
 
   const send = async (): Promise<void> => {
     const message = input.trim()
