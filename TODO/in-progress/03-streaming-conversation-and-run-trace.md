@@ -53,7 +53,7 @@
 - [ ] 完成后折叠为“耗时、工具数、状态”的单行摘要。
 - [ ] Tool Call 可以展开查看输入、输出和错误。
 - [ ] Permission 请求提供明确的允许、拒绝和范围选项。
-- [ ] Diff 和文件改动使用独立卡片，不塞入纯文本。
+- [ ] 文件改动只显示简短摘要，不在对话流展开完整 Diff。
 - [ ] 自动滚动只在用户位于底部附近时生效。
 
 ### 输入区
@@ -87,6 +87,6 @@
 ## 复用重点
 
 - assistant-ui：Thread、Message、Composer、自动滚动和流式原语。
-- OpenCode Session UI：工具分组、状态摘要和 Diff 卡片交互。
+- OpenCode Session UI：工具分组和状态摘要。
 - TanStack Virtual：长对话虚拟化。
 - Radix UI：Permission、菜单和折叠交互。

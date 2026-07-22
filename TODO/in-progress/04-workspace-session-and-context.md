@@ -13,6 +13,7 @@
 
 - MVP 同一时间只激活一个 Workspace。
 - 一个活动 Workspace 对应一个长期 OMP RPC 进程。
+- 单个 OMP Runtime 同一时间只有一个活动 Session 可以生成。
 - Session 消息和 Agent 状态由 OMP 持有。
 - Desktop 只保存 Workspace 列表、置顶、归档和界面偏好。
 - 不复制一份独立聊天数据库。
@@ -53,14 +54,14 @@
 - [ ] 支持置顶和归档。
 - [ ] 最近会话按今天、最近 7 天和更早分组。
 - [ ] 运行中的 Session 显示明确状态。
+- [ ] Agent 生成期间禁止另一 Session 同时发起 Prompt，并给出明确提示。
 - [ ] 恢复时不重复消息，不丢失 Tool Call 和 Thinking 数据。
 
 ### `@` 引用
 
-- [ ] 输入 `@` 后显示文件、目录、Session 和 Diff 候选。
+- [ ] 输入 `@` 后显示文件、目录和 Session 候选。
 - [ ] `@file` 引用文件路径和所需内容。
 - [ ] `@folder` 只加入目录说明和选定文件，不递归塞入全部内容。
-- [ ] `@diff` 引用当前 Git Diff。
 - [ ] `@session` 默认引用摘要和关键消息。
 - [ ] 明确显示每个引用的来源、大小和移除入口。
 - [ ] 引用解析失败时不阻塞普通 Prompt。
@@ -77,17 +78,19 @@
 
 - [ ] 测试 Workspace 切换时只存在一个 OMP 进程。
 - [ ] 测试 Session 新建、切换和历史恢复。
+- [ ] 测试单 Runtime 不会并行生成两个 Session。
 - [ ] 测试 Session 文件缺失和损坏。
 - [ ] 测试搜索、置顶和归档持久化。
-- [ ] 测试四类 `@` 引用的插入和移除。
+- [ ] 测试三类 `@` 引用的插入和移除。
 
 ## 完成条件
 
 - [ ] 应用重启后可以恢复最近 Workspace。
 - [ ] 可以新建、切换和恢复 Session。
+- [ ] 多个 Session 可保存和切换，但同一时间只有一个 Session 生成。
 - [ ] Session 消息只以 OMP 数据为准。
 - [ ] Workspace 切换不会遗留旧 OMP 进程。
-- [ ] `@file`、`@folder`、`@session`、`@diff` 可以加入输入上下文。
+- [ ] `@file`、`@folder`、`@session` 可以加入输入上下文。
 - [ ] 相关状态在重启后保持一致。
 
 ## 需要记录的决策

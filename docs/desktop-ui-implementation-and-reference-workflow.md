@@ -8,13 +8,13 @@
 
 采用分层复用：
 
-| 层 | 主要参考 | 用途 |
-| --- | --- | --- |
-| Desktop 外壳 | [OpenCode Desktop](https://github.com/anomalyco/opencode) | Electron 主进程、Preload、Sidecar、窗口、日志、打包 |
-| Agent 后端 | [Oh My Pi](https://github.com/can1357/oh-my-pi) | JSONL RPC、会话、模型、Thinking、工具调用、流式事件 |
-| 聊天 UI | [assistant-ui](https://github.com/assistant-ui/assistant-ui) | Thread、Message、Composer、流式渲染、自动滚动、工具组件 |
-| OMP Desktop 适配 | [ohmypi-craft](https://github.com/BRCOO/ohmypi-craft) | Electron/React 与 OMP RPC 的现成连接方式 |
-| 工具交互 | [OpenCode Session UI](https://github.com/anomalyco/opencode/tree/dev/packages/session-ui) | 工具分组、运行状态、折叠详情、Diff 展示 |
+| 层               | 主要参考                                                                                  | 用途                                                    |
+| ---------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Desktop 外壳     | [OpenCode Desktop](https://github.com/anomalyco/opencode)                                 | Electron 主进程、Preload、Sidecar、窗口、日志、打包     |
+| Agent 后端       | [Oh My Pi](https://github.com/can1357/oh-my-pi)                                           | JSONL RPC、会话、模型、Thinking、工具调用、流式事件     |
+| 聊天 UI          | [assistant-ui](https://github.com/assistant-ui/assistant-ui)                              | Thread、Message、Composer、流式渲染、自动滚动、工具组件 |
+| OMP Desktop 适配 | [ohmypi-craft](https://github.com/BRCOO/ohmypi-craft)                                     | Electron/React 与 OMP RPC 的现成连接方式                |
+| 工具交互         | [OpenCode Session UI](https://github.com/anomalyco/opencode/tree/dev/packages/session-ui) | 工具分组、运行状态、折叠详情、Diff 展示                 |
 
 不要整体 Fork 后直接修改。只复用最小、明确的部分。
 
@@ -24,7 +24,7 @@
 Electron Main
 ├── 启动和停止 OMP 进程
 ├── 通过 stdin/stdout 交换 JSONL RPC
-├── 管理环境变量、代理和工作目录
+├── 解析 Runtime Environment / Network Profile 并生成 OMP `env`
 └── 通过安全 IPC 转发给 Renderer
 
 Electron Preload
@@ -52,11 +52,11 @@ Thinking、工具调用和最终文本属于同一个 Assistant Turn。
 
 ```ts
 type AssistantTurn = {
-  text: TextPart[];
-  reasoning: ReasoningPart[];
-  tools: ToolPart[];
-  status: "running" | "done" | "error";
-};
+  text: TextPart[]
+  reasoning: ReasoningPart[]
+  tools: ToolPart[]
+  status: 'running' | 'done' | 'error'
+}
 ```
 
 OMP RPC 已提供所需事件：
@@ -117,13 +117,24 @@ Thinking、工具参数和工具结果持续更新。
 ```text
 Electron
 ├── electron-vite
-├── electron-builder
 ├── React
-├── assistant-ui
-├── Radix UI
+├── Tailwind CSS 4
+├── lucide-react
 ├── react-resizable-panels
-└── TanStack Virtual
+├── assistant-ui（需要真实聊天能力时）
+├── Radix UI（需要复杂菜单、对话框或选择器时）
+└── TanStack Virtual（长列表出现时）
 ```
+
+MVP-01 只接入 Tailwind CSS 4、`lucide-react` 和 `react-resizable-panels`。`electron-builder` 在 MVP-07 接入；Radix UI、assistant-ui 和 TanStack Virtual 在首次出现真实需求时再接入。
+
+样式边界：
+
+- Tailwind 管理布局、间距、颜色、字体、边框和交互状态。
+- 少量普通 CSS 管理 Reset 补充、滚动条、拖动柄和复杂样式。
+- 使用语义化主题变量，避免大量任意值和动态拼接类名。
+- 使用系统字体，不下载或打包在线字体。
+- 三栏使用 `react-resizable-panels`，默认比例为 `18/17/65`，并支持拖动调整宽度。
 
 复用边界：
 
@@ -192,15 +203,18 @@ git checkout
 本地参考：`../omp-references/opencode`
 
 重点目录：
+
 - `packages/desktop/`
 - `packages/session-ui/`
 
 用途：
+
 - Electron 生命周期
 - Sidecar 管理
 - 工具调用折叠
 
 限制：
+
 - 只读
 - 不复制完整架构
 - 只读取完成当前任务所需的文件
@@ -232,7 +246,8 @@ git rev-parse HEAD
 3. 接入最小聊天界面和流式文本。
 4. 实现 Thinking/Tool Trace 的运行时展开和完成后折叠。
 5. 接入会话列表和项目工作目录。
-6. 接入文件树、文件读取和 Diff。
-7. 最后处理终端、内置浏览器、Browser Use 和 Computer Use。
+6. 接入文件树、文件读取和简单编辑。
+7. MVP 之后接入 Changes / Review / Diff 和多标签 Terminal。
+8. 最后处理内置浏览器、Browser Use 和 Computer Use。
 
 第一阶段只解决核心聊天和本地代码任务。不要提前扩大范围。

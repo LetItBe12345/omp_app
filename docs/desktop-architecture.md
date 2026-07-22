@@ -197,7 +197,7 @@ React Renderer
 示例 RPC 命令：
 
 ```json
-{"id":"req-1","type":"prompt","message":"分析这个项目"}
+{ "id": "req-1", "type": "prompt", "message": "分析这个项目" }
 ```
 
 典型事件：
@@ -272,6 +272,36 @@ MVP 推荐：
 Terminal 和 Browser 按需创建。
 
 未打开时不占用对应资源。
+
+单个 OMP Runtime 当前只有一个活动 `AgentSession`。RPC `prompt` 不携带 Session ID，`switch_session` 会切换这个单例，因此 MVP 虽能保存和切换多个 Session，同一时间只能有一个 Session 生成。
+
+MVP 之后如需多 Session 并行，采用 Runtime 池：每个正在生成的 Session 对应一个 OMP RPC 进程，事件和生命周期以 Session ID 路由。Settings 控制最大并行数量，达到上限后排队或提示用户处理。闲置 Session 只保留 Session 文件，不占用进程。
+
+### 7.1 OMP Runtime 环境与网络
+
+MVP 不为 Electron 自身建立泛化代理层。Desktop 是 OMP Runtime 配置的控制面：Main 在启动 `omp --mode rpc` 时生成并注入最终 `env`。
+
+配置分为两个独立模型：
+
+- Runtime Environment Profile：Shell、PATH、普通环境变量和 Workspace 工作目录。
+- Runtime Network Profile：不使用代理、使用系统代理或使用手动 HTTP/HTTPS/SOCKS5 代理。
+
+启动 Runtime 时的合并顺序：
+
+```text
+系统基础环境
++ Runtime Environment Profile
++ Runtime Network Profile
+= OMP Runtime 最终 env
+```
+
+“不使用代理”必须显式移除大小写的 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY` 和 `NO_PROXY` 等变量，不能只是停止写入。
+
+RPC 只传输命令和事件。OMP Runtime 实际执行 Agent Bash Tool，它启动的 Shell 子进程默认继承 Runtime 的最终环境。
+
+修改任一 Profile 后，Main 必须重启 OMP Runtime，然后通过 OMP Session 恢复当前会话。
+
+后续的内置 Terminal 是独立 PTY 进程，不参与 Agent Bash Tool 执行。Terminal 和 Browser 分别拥有自己的代理适配，不强制与 OMP Runtime 使用同一策略。
 
 ## 8. 性能问题的本质
 
@@ -451,18 +481,22 @@ CI 应记录每次构建的变化趋势。
 - 对话输入和流式输出
 - Thinking 和 Tool Call 状态
 - Session 创建、切换和恢复
+- 同一时间只允许当前 Session 生成
 - 基础文件树
 - 基础设置
-- OMP 环境变量和代理配置
+- OMP Runtime 环境与网络配置
 
 暂缓：
 
+- Changes / Review / Diff
+- 内置 Terminal
 - 内置 Browser
 - Computer Use
 - 多窗口
 - 插件市场
 - 完整 IDE
 - 复杂工作区索引
+- 多 Runtime 的 Session 并行
 
 先保证主链路稳定和快速。
 

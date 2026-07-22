@@ -13,17 +13,24 @@
 - [x] MVP 只保留一个活动 Workspace 和一个长期 OMP RPC 进程。
 - [x] Session 通过 OMP 的会话能力切换，不为每个会话启动进程。
 - [x] Browser Use、Computer Use、多窗口和插件市场不进入 MVP。
+- [x] Changes / Review / Diff 和内置 Terminal 不进入 MVP。
 - [x] 不 Fork OMP，不新增第二套 Agent 协议，不解析 TUI 输出。
 
 ## 执行顺序
 
-- [ ] [MVP-01：Electron 工程骨架](./01-electron-project-scaffold.md)
+- [x] [MVP-01：Electron 工程骨架](../done/01-electron-project-scaffold.md)
 - [ ] [MVP-02：OMP RPC 与 IPC 主链路](./02-omp-rpc-runtime-and-ipc.md)
 - [ ] [MVP-03：流式对话与执行轨迹](./03-streaming-conversation-and-run-trace.md)
 - [ ] [MVP-04：Workspace、Session 与上下文引用](./04-workspace-session-and-context.md)
-- [ ] [MVP-05：文件树、预览与 Diff](./05-files-context-and-diff.md)
-- [ ] [MVP-06：Terminal、环境与代理](./06-terminal-environment-and-proxy.md)
+- [ ] [MVP-05：文件树、预览与编辑](./05-files-preview-and-edit.md)
+- [ ] [MVP-06：OMP Runtime 环境与网络](./06-runtime-environment-and-network.md)
 - [ ] [MVP-07：Ubuntu 打包与 MVP 验收](./07-ubuntu-packaging-and-acceptance.md)
+
+## MVP 之后
+
+- [ ] [POST-MVP-01：Changes、Review 与 Diff](./08-changes-review-and-diff.md)
+- [ ] [POST-MVP-02：内置多标签 Terminal](./09-multi-tab-terminal.md)
+- [ ] [POST-MVP-03：多 Session 并行 Runtime](./10-parallel-session-runtimes.md)
 
 ## 依赖关系
 
@@ -45,9 +52,8 @@ MVP-02 + MVP-03 + MVP-04 + MVP-05 + MVP-06
 - [ ] 回复完成后，执行过程自动折叠，最终回答保持突出。
 - [ ] 可以停止、Steer 和 Follow-up。
 - [ ] 可以创建、切换和恢复 Session。
-- [ ] 可以浏览文件、预览文本、保存简单修改并查看 Diff。
-- [ ] 可以打开内置 Terminal，且与 OMP 使用同一环境配置。
-- [ ] 可以配置应用级代理，不依赖系统全局代理。
+- [ ] 可以浏览文件、预览文本并保存简单修改。
+- [ ] 可以控制 OMP Runtime 使用或不使用代理，不依赖系统全局代理。
 - [ ] 安装包、空闲资源和首屏体积不超过架构文档中的回归预算。
 
 ## 维护规则
