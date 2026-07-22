@@ -72,7 +72,7 @@ function createWindow(): BrowserWindow {
     minWidth: 1024,
     minHeight: 700,
     center: true,
-    show: false,
+    show: smokeMode,
     backgroundColor: '#f7f7f6',
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
