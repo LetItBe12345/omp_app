@@ -2,10 +2,15 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const ompPath = fileURLToPath(new URL("../runtime/omp", import.meta.url));
+const fakeMode = process.env.OMP_RPC_FAKE === "1";
+const executable = fakeMode ? process.execPath : ompPath;
+const args = fakeMode
+  ? [fileURLToPath(new URL("../tests/fixtures/fake-omp.mjs", import.meta.url))]
+  : ["--mode", "rpc", "--no-session", "--no-extensions", "--no-skills", "--no-rules"];
 const requestId = "rpc-smoke-1";
 const child = spawn(
-  ompPath,
-  ["--mode", "rpc", "--no-session", "--no-extensions", "--no-skills", "--no-rules"],
+  executable,
+  args,
   { stdio: ["pipe", "pipe", "pipe"] },
 );
 
