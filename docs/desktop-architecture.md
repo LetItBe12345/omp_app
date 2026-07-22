@@ -352,6 +352,8 @@ RPC 本身不是主要瓶颈。
 - 加载大型编辑器
 - 初始化所有可选能力
 
+Runtime 自动恢复不得阻塞首屏。默认在 Renderer 完成首次绘制并报告 `renderer_ready` 后，再恢复 Workspace、Session 并启动 OMP。是否改为与首屏并行启动，必须比较 `first_paint`、`interactive_ready` 和 `omp_ready` 后决定；发生冲突时优先保证基础窗口可以快速显示和操作。
+
 ### 9.2 合并流式事件
 
 不要每收到一个 token 就触发一次 React 更新。
@@ -371,6 +373,8 @@ OMP message_update
 
 消息开始/结束、工具开始/结束、错误和 Extension UI 请求不做延迟合并。单条 RPC JSONL 帧设置 16 MiB 硬上限，防止异常输出耗尽 Main 内存。
 
+高频事件批次不能只设置时间窗口，还要设置最大事件数量和累计字节数。达到时间、数量或字节数任一上限就立即发送，具体阈值通过高频文本和大型 Tool 输出测试确定。
+
 ### 9.3 只更新当前消息
 
 流式输出时：
@@ -379,6 +383,10 @@ OMP message_update
 - 不重新生成整个对话数组
 - 不重新解析全部 Markdown
 - 已完成消息使用缓存
+
+Renderer 不长期保存完整 RPC 原始事件。历史恢复和实时事件都转换成同一种消息渲染投影；`OmpEventReducer`、React 状态和 assistant-ui Runtime 之间不得分别保存完整消息副本。
+
+Markdown、代码高亮和 Tool 输出缓存必须有数量或内存上限。原始事件处理后释放；不可见且能够从 OMP Session 恢复的数据可以从缓存淘汰。图片不得在 Prompt 输入、IPC 参数和消息状态中长期保留多份 Base64 副本。
 
 ### 9.4 对话和文件树虚拟化
 
@@ -398,12 +406,16 @@ OMP message_update
 
 以下能力必须按需加载：
 
+- 完整模型管理和 Provider 授权界面
+- Markdown 渲染和代码高亮
 - Terminal
 - Browser
 - 代码编辑器
 - PDF 渲染
 - Diff 高亮
 - 图表
+
+只拆分明显较大且首屏不需要的能力，不把每个小控件拆成独立 chunk。构建后检查首屏 chunk 的组成，防止未使用的大型依赖进入首屏。
 
 ### 9.6 Main 不做重计算
 
@@ -423,7 +435,9 @@ Linux 默认保留硬件加速。
 
 不要为了少数驱动问题，全局关闭 GPU。
 
-提供兼容模式作为用户选项。
+提供需要重启生效的图形兼容模式，但不在一次 GPU 进程异常后自动永久关闭硬件加速。兼容模式必须在 `app.ready` 前生效，并提供 `--disable-gpu` 启动参数，供黑屏时从窗口外进入应用。
+
+应用记录当前显示协议、兼容模式、Electron/Chromium 版本、GPU Feature Status 和 GPU 进程异常，不记录不必要的用户设备信息。Headless 软件渲染 Smoke 只验证应用能启动，不能替代真实 GPU 验收。
 
 重点测试：
 
@@ -465,7 +479,10 @@ window_created
 dom_ready
 first_paint
 renderer_ready
+interactive_ready
+runtime_start
 omp_ready
+prompt_sent
 first_token
 ```
 
@@ -479,7 +496,9 @@ first_token
 
 这些预算是回归线，不是最终承诺。
 
-CI 应记录每次构建的变化趋势。
+CI 应记录每次构建的变化趋势。冷启动和热启动分开测量，多次运行取中位数；CI 主要发现明显回归，启动和真实 GPU 结果以固定机器为准。
+
+内存至少分开记录 Electron Main、Renderer、GPU/Utility 进程和 OMP Runtime。空闲内存在启动完成并稳定一段时间后测量；流式场景分别记录开始、持续输出、结束和恢复空闲后的内存。
 
 ## 12. MVP 边界
 
