@@ -130,4 +130,38 @@ describe('App shell', () => {
     expect(window.desktop.stopCurrentRun).toHaveBeenCalledTimes(1)
     finishStop?.({ ok: true, data: null })
   })
+
+  it('当前模型从可用目录消失时阻止发送并打开模型选择器', async () => {
+    vi.mocked(window.desktop.getRuntimeState).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        status: 'ready',
+        workspacePath: '/tmp/workspace',
+        sessionId: 'session-1',
+        isStreaming: false,
+        queuedMessageCount: 0,
+        model: 'missing/model'
+      }
+    })
+    vi.mocked(window.desktop.getAvailableModels).mockResolvedValueOnce({
+      ok: true,
+      data: [
+        {
+          provider: 'test',
+          id: 'fake-model',
+          name: 'Fake Model',
+          reasoning: false
+        }
+      ]
+    })
+    render(<App />)
+
+    expect(
+      await screen.findByText('当前模型不可用，请重新选择模型')
+    ).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '任务输入' })).toBeDisabled()
+    expect(
+      screen.getByRole('combobox', { name: '模型选择器' })
+    ).toBeInTheDocument()
+  })
 })

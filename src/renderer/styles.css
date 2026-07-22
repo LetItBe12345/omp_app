@@ -40,8 +40,150 @@ body {
 }
 
 button,
+input,
 textarea {
   font: inherit;
+}
+
+.composer-control {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: var(--surface-panel);
+  padding: 0.35rem 0.65rem;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+.composer-control:hover:not(:disabled) {
+  border-color: #c7c7c1;
+  background: var(--surface-selected);
+}
+
+.composer-control:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.popover-panel {
+  z-index: 50;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: white;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 12%);
+}
+
+.command-search {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.75rem;
+  color: var(--text-muted);
+}
+
+.command-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  padding: 0.7rem 0;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  outline: none;
+}
+
+[cmdk-group-heading] {
+  padding: 0.6rem 0.65rem 0.35rem;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+}
+
+.command-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border-radius: 0.5rem;
+  padding: 0.55rem 0.65rem;
+  color: var(--text-primary);
+  cursor: default;
+  outline: none;
+}
+
+.command-item[data-selected='true'] {
+  background: var(--surface-selected);
+}
+
+.command-item[data-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.dialog-overlay {
+  position: fixed;
+  z-index: 60;
+  inset: 0;
+  background: rgb(20 20 18 / 35%);
+}
+
+.dialog-panel {
+  position: fixed;
+  z-index: 61;
+  top: 50%;
+  left: 50%;
+  width: min(34rem, calc(100vw - 2rem));
+  max-height: min(42rem, calc(100vh - 2rem));
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: white;
+  box-shadow: 0 24px 64px rgb(0 0 0 / 20%);
+  transform: translate(-50%, -50%);
+}
+
+.icon-control {
+  display: inline-grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: 0.5rem;
+  color: var(--text-secondary);
+}
+
+.icon-control:hover {
+  background: var(--surface-selected);
+}
+
+.primary-button,
+.secondary-button {
+  display: inline-flex;
+  min-height: 2.1rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border-radius: 0.55rem;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.75rem;
+}
+
+.primary-button {
+  background: var(--text-primary);
+  color: white;
+}
+
+.secondary-button {
+  border: 1px solid var(--border);
+  background: white;
+  color: var(--text-secondary);
+}
+
+.primary-button:disabled,
+.secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .panel-surface {

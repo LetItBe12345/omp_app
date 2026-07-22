@@ -10,13 +10,16 @@ import { isAbsolute } from 'node:path'
 import type {
   DesktopResult,
   ExtensionUiResponse,
+  ModelSelection,
   OmpEvent,
   PromptInput,
   RuntimeEvent,
-  RuntimeSnapshot
+  RuntimeSnapshot,
+  ProviderLoginState
 } from '../shared/desktop-api'
 import { IPC_CHANNELS } from '../shared/desktop-api'
 import { validateExternalUrl } from './external-url'
+import { redactRuntimeLog } from './runtime-diagnostics'
 import { RuntimeFailure } from './runtime-supervisor'
 import type { RuntimeSupervisor } from './runtime-supervisor'
 import { log } from './logger'
@@ -121,6 +124,64 @@ function isExtensionUiResponse(value: unknown): value is ExtensionUiResponse {
   )
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function sanitizeLoginText(
+  value: unknown,
+  maxLength = 600
+): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const withoutUrls = value.replace(/https?:\/\/\S+/giu, '[链接已隐藏]')
+  return redactRuntimeLog(withoutUrls, maxLength).trim() || undefined
+}
+
+function loginFailure(error: unknown): RuntimeFailure {
+  const raw = error instanceof Error ? error.message : String(error)
+  if (/requires interactive prompts|terminal ui/iu.test(raw)) {
+    return new RuntimeFailure(
+      'UNSUPPORTED',
+      '该 Provider 需要在 OMP Terminal 登录',
+      false
+    )
+  }
+  if (/timed?\s*out|timeout/iu.test(raw)) {
+    return new RuntimeFailure('RPC_TIMEOUT', '登录输入超时', true)
+  }
+  if (/cancel/iu.test(raw)) {
+    return new RuntimeFailure('INVALID_ARGUMENT', '登录已取消', true)
+  }
+  const detail = sanitizeLoginText(raw, 240)
+  return new RuntimeFailure(
+    'INVALID_ARGUMENT',
+    detail ? `授权失败：${detail}` : '授权失败',
+    true
+  )
+}
+
+function validateModelSelection(value: unknown): ModelSelection {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new RuntimeFailure('INVALID_ARGUMENT', '模型参数无效', false)
+  }
+  const record = value as Record<string, unknown>
+  if (
+    typeof record['provider'] !== 'string' ||
+    typeof record['modelId'] !== 'string' ||
+    (record['thinkingLevel'] !== undefined &&
+      typeof record['thinkingLevel'] !== 'string')
+  ) {
+    throw new RuntimeFailure('INVALID_ARGUMENT', '模型参数无效', false)
+  }
+  return {
+    provider: record['provider'],
+    modelId: record['modelId'],
+    ...(typeof record['thinkingLevel'] === 'string'
+      ? { thinkingLevel: record['thinkingLevel'] }
+      : {})
+  }
+}
+
 export function registerRuntimeIpc(
   supervisor: RuntimeSupervisor,
   getWindow: WindowGetter,
@@ -132,8 +193,19 @@ export function registerRuntimeIpc(
   >()
   let eventBatch: OmpEvent[] = []
   let eventBatchTimer: NodeJS.Timeout | null = null
+  let providerLoginState: ProviderLoginState = { status: 'idle' }
+  let activeLoginTask: Promise<void> | null = null
+  let activeLoginProviderId: string | null = null
+  let loginCancellationRequested = false
+  let loginInputTimedOut = false
+  let providerLoginUrl: URL | null = null
   const channels = [
     IPC_CHANNELS.chooseWorkspace,
+    IPC_CHANNELS.cancelPendingModelSelection,
+    IPC_CHANNELS.cancelProviderLogin,
+    IPC_CHANNELS.getAvailableModels,
+    IPC_CHANNELS.getLoginProviders,
+    IPC_CHANNELS.getProviderLoginState,
     IPC_CHANNELS.getMessages,
     IPC_CHANNELS.getRuntimeState,
     IPC_CHANNELS.restartRuntime,
@@ -143,7 +215,9 @@ export function registerRuntimeIpc(
     IPC_CHANNELS.newSession,
     IPC_CHANNELS.openRuntimeLog,
     IPC_CHANNELS.switchSession,
-    IPC_CHANNELS.setModel,
+    IPC_CHANNELS.loginProvider,
+    IPC_CHANNELS.reopenProviderLoginUrl,
+    IPC_CHANNELS.selectModel,
     IPC_CHANNELS.setThinkingLevel,
     IPC_CHANNELS.respondExtensionUi,
     IPC_CHANNELS.revealPath
@@ -153,6 +227,11 @@ export function registerRuntimeIpc(
     const window = getWindow()
     if (!window || window.isDestroyed()) return
     window.webContents.send(IPC_CHANNELS.event, event)
+  }
+
+  const setProviderLoginState = (state: ProviderLoginState): void => {
+    providerLoginState = state
+    send({ type: 'provider-login', state })
   }
 
   const onSnapshot = (snapshot: RuntimeSnapshot): void => {
@@ -230,11 +309,29 @@ export function registerRuntimeIpc(
             : event['url']
         const url =
           typeof rawUrl === 'string' ? validateExternalUrl(rawUrl) : null
-        if (url) {
-          void shell.openExternal(url.toString()).catch((error: unknown) => {
-            log.error('打开 Extension URL 失败', error)
+        if (!url) return
+        if (activeLoginTask) {
+          providerLoginUrl = url
+          setProviderLoginState({
+            status: 'opening-browser',
+            providerId: activeLoginProviderId ?? undefined,
+            message: '已打开系统浏览器',
+            instructions: sanitizeLoginText(event['instructions']),
+            canReopenBrowser: true
           })
         }
+        void shell.openExternal(url.toString()).catch((error: unknown) => {
+          log.error('打开 Extension URL 失败', error)
+          if (activeLoginTask) {
+            setProviderLoginState({
+              status: 'opening-browser',
+              providerId: activeLoginProviderId ?? undefined,
+              message: '无法打开系统浏览器',
+              instructions: sanitizeLoginText(event['instructions']),
+              canReopenBrowser: true
+            })
+          }
+        })
         return
       }
       if (method === 'cancel' && typeof event['targetId'] === 'string') {
@@ -260,9 +357,40 @@ export function registerRuntimeIpc(
                   // Runtime 已退出时只清理本地状态。
                 }
                 deletePendingExtensionUi(requestId)
+                if (activeLoginTask) {
+                  loginInputTimedOut = true
+                  setProviderLoginState({
+                    status: 'failed',
+                    providerId: activeLoginProviderId ?? undefined,
+                    message: '登录输入超时',
+                    canReopenBrowser: providerLoginUrl !== null
+                  })
+                }
               }, event['timeout'])
             : undefined
         pendingExtensionUi.set(requestId, { event, timer: timeout })
+        if (method === 'input' && activeLoginTask) {
+          setProviderLoginState({
+            status: 'waiting-input',
+            providerId: activeLoginProviderId ?? undefined,
+            input: {
+              id: requestId,
+              message:
+                sanitizeLoginText(event['message'], 240) ?? '请输入授权信息',
+              placeholder: sanitizeLoginText(event['placeholder'], 120)
+            },
+            canReopenBrowser: providerLoginUrl !== null
+          })
+          return
+        }
+      } else if (method === 'notify' && activeLoginTask) {
+        setProviderLoginState({
+          status: 'progress',
+          providerId: activeLoginProviderId ?? undefined,
+          message: sanitizeLoginText(event['message'], 240) ?? '正在处理授权',
+          canReopenBrowser: providerLoginUrl !== null
+        })
+        return
       } else {
         return
       }
@@ -343,6 +471,169 @@ export function registerRuntimeIpc(
     try {
       assertTrustedSender(event, getWindow, developmentUrl)
       return success(await supervisor.getMessages())
+    } catch (error) {
+      return failure(error)
+    }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.getLoginProviders, async (event) => {
+    try {
+      assertTrustedSender(event, getWindow, developmentUrl)
+      return success(await supervisor.getLoginProviders())
+    } catch (error) {
+      return failure(error)
+    }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.getAvailableModels, async (event) => {
+    try {
+      assertTrustedSender(event, getWindow, developmentUrl)
+      return success(await supervisor.getAvailableModels())
+    } catch (error) {
+      return failure(error)
+    }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.getProviderLoginState, async (event) => {
+    try {
+      assertTrustedSender(event, getWindow, developmentUrl)
+      return success(providerLoginState)
+    } catch (error) {
+      return failure(error)
+    }
+  })
+
+  ipcMain.handle(
+    IPC_CHANNELS.loginProvider,
+    async (event, providerId: unknown) => {
+      try {
+        assertTrustedSender(event, getWindow, developmentUrl)
+        if (typeof providerId !== 'string' || !providerId.trim()) {
+          throw new RuntimeFailure(
+            'INVALID_ARGUMENT',
+            'Provider ID 无效',
+            false
+          )
+        }
+        if (activeLoginTask) {
+          throw new RuntimeFailure(
+            'RUNTIME_NOT_READY',
+            '已有 Provider 正在登录',
+            true
+          )
+        }
+        activeLoginProviderId = providerId
+        loginCancellationRequested = false
+        loginInputTimedOut = false
+        providerLoginUrl = null
+        setProviderLoginState({
+          status: 'starting',
+          providerId,
+          message: '正在启动登录'
+        })
+        activeLoginTask = supervisor.loginProvider(providerId)
+        try {
+          await activeLoginTask
+          setProviderLoginState({ status: 'idle' })
+          return success(undefined)
+        } catch (error) {
+          if (loginInputTimedOut) {
+            const timedOut = new RuntimeFailure(
+              'RPC_TIMEOUT',
+              '登录输入超时',
+              true
+            )
+            setProviderLoginState({
+              status: 'failed',
+              providerId,
+              message: timedOut.message,
+              canReopenBrowser: providerLoginUrl !== null
+            })
+            return failure(timedOut)
+          }
+          if (loginCancellationRequested) {
+            setProviderLoginState({ status: 'idle' })
+            return failure(
+              new RuntimeFailure('INVALID_ARGUMENT', '登录已取消', true)
+            )
+          }
+          const diagnostic = sanitizeLoginText(
+            error instanceof Error ? error.message : String(error),
+            2_048
+          )
+          if (diagnostic) {
+            supervisor.recordDiagnostic(
+              `Provider 登录失败 (${providerId}): ${diagnostic}`
+            )
+          }
+          const mapped = loginFailure(error)
+          log.warn('登录 Provider 失败', {
+            providerId,
+            message: mapped.message
+          })
+          setProviderLoginState({
+            status: 'failed',
+            providerId,
+            message: mapped.message,
+            canReopenBrowser: providerLoginUrl !== null
+          })
+          return failure(mapped)
+        } finally {
+          activeLoginTask = null
+          activeLoginProviderId = null
+          loginCancellationRequested = false
+          loginInputTimedOut = false
+          if (providerLoginState.status === 'idle') providerLoginUrl = null
+        }
+      } catch (error) {
+        return failure(error)
+      }
+    }
+  )
+
+  ipcMain.handle(IPC_CHANNELS.cancelProviderLogin, async (event) => {
+    try {
+      assertTrustedSender(event, getWindow, developmentUrl)
+      const task = activeLoginTask
+      if (!task) {
+        setProviderLoginState({ status: 'idle' })
+        return success(undefined)
+      }
+      loginCancellationRequested = true
+      setProviderLoginState({
+        status: 'cancelling',
+        providerId: activeLoginProviderId ?? undefined,
+        message: '正在取消登录'
+      })
+      cancelPendingExtensionUi()
+      const settled = await Promise.race([
+        task.then(
+          () => true,
+          () => true
+        ),
+        delay(5_000).then(() => false)
+      ])
+      if (!settled) await supervisor.restart()
+      setProviderLoginState({ status: 'idle' })
+      providerLoginUrl = null
+      return success(undefined)
+    } catch (error) {
+      return failure(error)
+    }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.reopenProviderLoginUrl, async (event) => {
+    try {
+      assertTrustedSender(event, getWindow, developmentUrl)
+      if (!providerLoginUrl) {
+        throw new RuntimeFailure(
+          'INVALID_ARGUMENT',
+          '当前没有可重新打开的授权页面',
+          false
+        )
+      }
+      await shell.openExternal(providerLoginUrl.toString())
+      return success(true)
     } catch (error) {
       return failure(error)
     }
@@ -470,21 +761,25 @@ export function registerRuntimeIpc(
     }
   )
 
-  ipcMain.handle(
-    IPC_CHANNELS.setModel,
-    async (event, provider: unknown, modelId: unknown) => {
-      try {
-        assertTrustedSender(event, getWindow, developmentUrl)
-        if (typeof provider !== 'string' || typeof modelId !== 'string') {
-          throw new RuntimeFailure('INVALID_ARGUMENT', '模型参数无效', false)
-        }
-        await supervisor.setModel(provider, modelId)
-        return success(undefined)
-      } catch (error) {
-        return failure(error)
-      }
+  ipcMain.handle(IPC_CHANNELS.selectModel, async (event, value: unknown) => {
+    try {
+      assertTrustedSender(event, getWindow, developmentUrl)
+      return success(
+        await supervisor.selectModel(validateModelSelection(value))
+      )
+    } catch (error) {
+      return failure(error)
     }
-  )
+  })
+
+  ipcMain.handle(IPC_CHANNELS.cancelPendingModelSelection, async (event) => {
+    try {
+      assertTrustedSender(event, getWindow, developmentUrl)
+      return success(supervisor.cancelPendingModelSelection())
+    } catch (error) {
+      return failure(error)
+    }
+  })
 
   ipcMain.handle(
     IPC_CHANNELS.setThinkingLevel,
@@ -524,6 +819,14 @@ export function registerRuntimeIpc(
         }
         supervisor.sendFrame({ type: 'extension_ui_response', id, ...response })
         deletePendingExtensionUi(id)
+        if (activeLoginTask) {
+          setProviderLoginState({
+            status: 'progress',
+            providerId: activeLoginProviderId ?? undefined,
+            message: '正在验证授权信息',
+            canReopenBrowser: providerLoginUrl !== null
+          })
+        }
         return success(undefined)
       } catch (error) {
         return failure(error)
@@ -554,7 +857,17 @@ export function registerRuntimeIpc(
   })
 
   const replayPending = (): void => {
+    if (providerLoginState.status !== 'idle') {
+      send({ type: 'provider-login', state: providerLoginState })
+    }
     for (const pending of pendingExtensionUi.values()) {
+      if (
+        activeLoginTask &&
+        pending.event.type === 'extension_ui_request' &&
+        pending.event['method'] === 'input'
+      ) {
+        continue
+      }
       send({ type: 'omp-event', event: pending.event })
     }
   }

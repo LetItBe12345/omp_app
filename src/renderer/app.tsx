@@ -17,7 +17,13 @@ import {
 } from 'react'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 import { uiFixture } from '../../tests/fixtures/ui-fixture'
-import type { RuntimeSnapshot } from '../shared/desktop-api'
+import type {
+  AvailableModel,
+  LoginProvider,
+  ProviderLoginState,
+  RuntimeSnapshot
+} from '../shared/desktop-api'
+import { ModelControls } from './model-controls'
 import { strings } from './strings'
 
 const fixture = __OMP_UI_FIXTURE__ ? uiFixture : null
@@ -210,17 +216,38 @@ function Conversation({
   runtime,
   onSnapshot,
   input,
-  onInput
+  onInput,
+  models,
+  providers,
+  loginState,
+  catalogError,
+  modelsLoaded,
+  onRefreshModels,
+  onRefreshProviders
 }: {
   runtime: RuntimeSnapshot
   onSnapshot: (snapshot: RuntimeSnapshot) => void
   input: string
   onInput: (value: string) => void
+  models: AvailableModel[]
+  providers: LoginProvider[]
+  loginState: ProviderLoginState
+  catalogError: string | null
+  modelsLoaded: boolean
+  onRefreshModels: () => Promise<boolean>
+  onRefreshProviders: () => Promise<boolean>
 }): React.JSX.Element {
   const [stopping, setStopping] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const busy = runtime.isStreaming || runtime.queuedMessageCount > 0
-  const ready = runtime.status === 'ready'
+  const currentModelAvailable =
+    !modelsLoaded ||
+    !runtime.model ||
+    models.some((model) => `${model.provider}/${model.id}` === runtime.model)
+  const ready =
+    runtime.status === 'ready' &&
+    !runtime.isAuthenticating &&
+    currentModelAvailable
   const busyRef = useRef(busy)
   const stoppingRef = useRef(stopping)
   const stopRef = useRef<() => Promise<void>>(async () => undefined)
@@ -338,6 +365,17 @@ function Conversation({
 
       <div className="shrink-0 p-5 pt-0">
         <div className="mx-auto max-w-4xl rounded-2xl border border-[var(--border)] bg-white p-3 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+          <ModelControls
+            catalogError={catalogError}
+            loginState={loginState}
+            models={models}
+            modelsLoaded={modelsLoaded}
+            onRefreshModels={onRefreshModels}
+            onRefreshProviders={onRefreshProviders}
+            onSnapshot={onSnapshot}
+            providers={providers}
+            runtime={runtime}
+          />
           <textarea
             aria-label="任务输入"
             className="h-20 w-full resize-none bg-transparent px-2 py-1 text-sm outline-none placeholder:text-[var(--text-muted)] disabled:cursor-not-allowed"
@@ -359,20 +397,24 @@ function Conversation({
           <div className="flex items-center justify-between px-1">
             <span className="text-[11px] text-[var(--text-muted)]">
               {error ??
-                (runtime.status === 'starting'
-                  ? 'Runtime 启动中'
-                  : runtime.status === 'failed'
-                    ? [
-                        runtime.error?.message,
-                        runtime.diagnosticSummary?.at(-1)
-                      ]
-                        .filter(Boolean)
-                        .join(' · ')
-                    : ready
-                      ? busy
-                        ? `${runtime.queuedMessageCount} 条待处理消息`
-                        : 'Runtime 已就绪'
-                      : strings.runtimeUnavailable)}
+                (runtime.isAuthenticating
+                  ? '正在授权 Provider'
+                  : !currentModelAvailable
+                    ? '当前模型不可用，请重新选择模型'
+                    : runtime.status === 'starting'
+                      ? 'Runtime 启动中'
+                      : runtime.status === 'failed'
+                        ? [
+                            runtime.error?.message,
+                            runtime.diagnosticSummary?.at(-1)
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')
+                        : ready
+                          ? busy
+                            ? `${runtime.queuedMessageCount} 条待处理消息`
+                            : 'Runtime 已就绪'
+                          : strings.runtimeUnavailable)}
             </span>
             {runtime.status === 'failed' && (
               <button
@@ -428,6 +470,13 @@ export function App(): React.JSX.Element {
     queuedMessageCount: 0
   })
   const [composerInput, setComposerInput] = useState('')
+  const [models, setModels] = useState<AvailableModel[]>([])
+  const [providers, setProviders] = useState<LoginProvider[]>([])
+  const [modelsLoaded, setModelsLoaded] = useState(false)
+  const [catalogError, setCatalogError] = useState<string | null>(null)
+  const [loginState, setLoginState] = useState<ProviderLoginState>({
+    status: 'idle'
+  })
   const draftKey = useRef<string | null>(null)
 
   const updateComposer = useCallback((value: string): void => {
@@ -451,15 +500,46 @@ export function App(): React.JSX.Element {
     setRuntime(snapshot)
   }, [])
 
+  const refreshModels = useCallback(async (): Promise<boolean> => {
+    const result = await window.desktop.getAvailableModels()
+    if (!result.ok) {
+      setCatalogError(`刷新失败：${result.error.message}`)
+      return false
+    }
+    setModels(result.data)
+    setModelsLoaded(true)
+    setCatalogError(null)
+    return true
+  }, [])
+
+  const refreshProviders = useCallback(async (): Promise<boolean> => {
+    const result = await window.desktop.getLoginProviders()
+    if (!result.ok) {
+      setCatalogError(`刷新失败：${result.error.message}`)
+      return false
+    }
+    setProviders(result.data)
+    setCatalogError(null)
+    return true
+  }, [])
+
   useEffect(() => {
     void window.desktop.getRuntimeState().then((result) => {
       if (result.ok) {
         applySnapshot(result.data)
-        if (result.data.status === 'ready') void window.desktop.getMessages()
+        if (result.data.status === 'ready') {
+          void window.desktop.getMessages()
+          void refreshModels()
+          void refreshProviders()
+          void window.desktop.getProviderLoginState().then((loginResult) => {
+            if (loginResult.ok) setLoginState(loginResult.data)
+          })
+        }
       }
     })
     return window.desktop.onRuntimeEvent((event) => {
       if (event.type === 'snapshot') applySnapshot(event.snapshot)
+      if (event.type === 'provider-login') setLoginState(event.state)
       const handleOmpEvent = (ompEvent: {
         type: string
         [key: string]: unknown
@@ -476,6 +556,15 @@ export function App(): React.JSX.Element {
           }
           return
         }
+        if (ompEvent.type === 'model_selection_failed') {
+          const message = ompEvent['message']
+          setCatalogError(
+            typeof message === 'string'
+              ? `模型配置应用失败：${message}`
+              : '模型配置应用失败'
+          )
+          return
+        }
         if (!knownOmpEventTypes.has(ompEvent.type)) {
           window.desktop.log({
             level: 'debug',
@@ -488,7 +577,7 @@ export function App(): React.JSX.Element {
         for (const ompEvent of event.events) handleOmpEvent(ompEvent)
       }
     })
-  }, [applySnapshot, updateComposer])
+  }, [applySnapshot, refreshModels, refreshProviders, updateComposer])
 
   const openWorkspace = async (): Promise<void> => {
     const result = await window.desktop.chooseWorkspace()
@@ -518,6 +607,13 @@ export function App(): React.JSX.Element {
             onSnapshot={applySnapshot}
             input={composerInput}
             onInput={updateComposer}
+            models={models}
+            providers={providers}
+            loginState={loginState}
+            catalogError={catalogError}
+            modelsLoaded={modelsLoaded}
+            onRefreshModels={refreshModels}
+            onRefreshProviders={refreshProviders}
           />
         </Panel>
       </Group>

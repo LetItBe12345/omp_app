@@ -10,9 +10,19 @@ import { IPC_CHANNELS } from '../shared/desktop-api'
 
 const desktopApi: DesktopApi = {
   chooseWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.chooseWorkspace),
+  cancelPendingModelSelection: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.cancelPendingModelSelection),
+  cancelProviderLogin: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.cancelProviderLogin),
   followUp: (input) => ipcRenderer.invoke(IPC_CHANNELS.followUp, input),
   getRuntimeState: () => ipcRenderer.invoke(IPC_CHANNELS.getRuntimeState),
   getMessages: () => ipcRenderer.invoke(IPC_CHANNELS.getMessages),
+  getLoginProviders: () => ipcRenderer.invoke(IPC_CHANNELS.getLoginProviders),
+  getAvailableModels: () => ipcRenderer.invoke(IPC_CHANNELS.getAvailableModels),
+  getProviderLoginState: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.getProviderLoginState),
+  loginProvider: (providerId) =>
+    ipcRenderer.invoke(IPC_CHANNELS.loginProvider, providerId),
   newSession: () => ipcRenderer.invoke(IPC_CHANNELS.newSession),
   openRuntimeLog: () => ipcRenderer.invoke(IPC_CHANNELS.openRuntimeLog),
   openExternal: (url) =>
@@ -25,11 +35,13 @@ const desktopApi: DesktopApi = {
   },
   prompt: (input) => ipcRenderer.invoke(IPC_CHANNELS.prompt, input),
   restartRuntime: () => ipcRenderer.invoke(IPC_CHANNELS.restartRuntime),
+  reopenProviderLoginUrl: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.reopenProviderLoginUrl),
   respondExtensionUi: (id: string, response: ExtensionUiResponse) =>
     ipcRenderer.invoke(IPC_CHANNELS.respondExtensionUi, id, response),
   revealPath: (path) => ipcRenderer.invoke(IPC_CHANNELS.revealPath, path),
-  setModel: (provider, modelId) =>
-    ipcRenderer.invoke(IPC_CHANNELS.setModel, provider, modelId),
+  selectModel: (selection) =>
+    ipcRenderer.invoke(IPC_CHANNELS.selectModel, selection),
   setThinkingLevel: (level) =>
     ipcRenderer.invoke(IPC_CHANNELS.setThinkingLevel, level),
   stopCurrentRun: () => ipcRenderer.invoke(IPC_CHANNELS.stopCurrentRun),
