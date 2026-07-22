@@ -179,7 +179,7 @@ function FileTree({
             <p className="mt-3 text-sm font-medium">暂无文件</p>
             <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
               {runtime.workspacePath
-                ? '文件树将在 MVP-05 中提供。'
+                ? '文件树将在 MVP-06 中提供。'
                 : '打开 Workspace 后显示文件树。'}
             </p>
           </div>

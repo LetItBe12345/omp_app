@@ -3,7 +3,7 @@
 - 状态：已完成
 - 优先级：P0
 - 前置任务：无
-- 后续任务：MVP-02、MVP-05、MVP-06
+- 后续任务：MVP-02、MVP-06、MVP-07
 - 决策记录：`decision/01-electron-project-scaffold.md`
 
 ## 目标

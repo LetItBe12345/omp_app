@@ -1,8 +1,8 @@
-# MVP-07：Ubuntu 打包与 MVP 验收
+# MVP-08：Ubuntu 打包与 MVP 验收
 
 - 状态：未开始
 - 优先级：P0
-- 前置任务：MVP-02、MVP-03、MVP-04、MVP-05、MVP-06
+- 前置任务：MVP-02、MVP-03、MVP-04、MVP-05、MVP-06、MVP-07
 - 后续任务：无
 
 ## 目标

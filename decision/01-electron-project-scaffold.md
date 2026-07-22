@@ -15,7 +15,7 @@
 7. 包名为 `omp-desktop`，用户可见名称为 `OMP Desktop`，初始版本为 `0.0.0`，并设置 `private: true`。
 8. 删除模板 Demo、自动更新代码和 `@electron-toolkit/utils`；允许保留 `@electron-toolkit/tsconfig`。
 9. 只使用官方 Electron 下载源，不配置国内镜像。
-10. MVP-01 只生成和预览生产 bundle；`electron-builder`、AppImage 和安装包属于 MVP-07。
+10. MVP-01 只生成和预览生产 bundle；`electron-builder`、AppImage 和安装包属于 MVP-08。
 11. 开发环境启用 source map，生产构建不生成或分发 source map。
 
 ## 界面与样式
