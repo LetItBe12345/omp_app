@@ -8,6 +8,9 @@ import {
   type SpawnOptions
 } from 'node:child_process'
 import type {
+  AvailableModel,
+  LoginProvider,
+  ModelSelection,
   OmpEvent,
   PromptInput,
   RuntimeError,
@@ -30,7 +33,7 @@ type PendingRequest = {
   generation: number
   resolve: (response: RpcResponse) => void
   reject: (error: RuntimeFailure) => void
-  timer: NodeJS.Timeout
+  timer?: NodeJS.Timeout
 }
 
 type SpawnRuntime = (
@@ -115,12 +118,15 @@ export class RuntimeSupervisor extends EventEmitter {
   #trustedSessions = new Map<string, string>()
   #activeInput: PromptInput | null = null
   #queuedInputs: PromptInput[] = []
+  #pendingModelSelection: ModelSelection | null = null
+  #stoppingCurrentRun = false
   #parseErrorTimes: number[] = []
   #recentDiagnostics: string[] = []
   #snapshot: RuntimeSnapshot = {
     status: 'stopped',
     isStreaming: false,
-    queuedMessageCount: 0
+    queuedMessageCount: 0,
+    isAuthenticating: false
   }
 
   constructor(options: RuntimeSupervisorOptions) {
@@ -139,6 +145,10 @@ export class RuntimeSupervisor extends EventEmitter {
 
   get diagnosticsPath(): string {
     return this.#diagnostics.filePath
+  }
+
+  recordDiagnostic(message: string): void {
+    this.#diagnostics.write(message)
   }
 
   async start(
@@ -167,7 +177,11 @@ export class RuntimeSupervisor extends EventEmitter {
   async stop(): Promise<void> {
     const child = this.#child
     if (!child) {
-      this.#setSnapshot({ status: 'stopped', isStreaming: false })
+      this.#setSnapshot({
+        status: 'stopped',
+        isStreaming: false,
+        isAuthenticating: false
+      })
       await this.#diagnostics.flush()
       return
     }
@@ -200,6 +214,7 @@ export class RuntimeSupervisor extends EventEmitter {
     this.#setSnapshot({
       status: 'stopped',
       isStreaming: false,
+      isAuthenticating: false,
       queuedMessageCount: 0,
       error: undefined
     })
@@ -217,8 +232,107 @@ export class RuntimeSupervisor extends EventEmitter {
     return (await this.request({ type: 'get_messages' }, STATE_TIMEOUT_MS)).data
   }
 
+  async getLoginProviders(): Promise<LoginProvider[]> {
+    const response = await this.request(
+      { type: 'get_login_providers' },
+      STATE_TIMEOUT_MS
+    )
+    const data = isRecord(response.data) ? response.data : {}
+    const providers = Array.isArray(data['providers']) ? data['providers'] : []
+    return providers.flatMap((value): LoginProvider[] => {
+      if (!isRecord(value)) return []
+      const id = value['id']
+      const name = value['name']
+      const available = value['available']
+      if (
+        typeof id !== 'string' ||
+        typeof name !== 'string' ||
+        typeof available !== 'boolean'
+      )
+        return []
+      return [{ id, name, available }]
+    })
+  }
+
+  async getAvailableModels(): Promise<AvailableModel[]> {
+    const response = await this.request(
+      { type: 'get_available_models' },
+      STATE_TIMEOUT_MS
+    )
+    const data = isRecord(response.data) ? response.data : {}
+    const models = Array.isArray(data['models']) ? data['models'] : []
+    return models.flatMap((value): AvailableModel[] => {
+      if (!isRecord(value)) return []
+      const provider = value['provider']
+      const id = value['id']
+      const name = value['name']
+      if (
+        typeof provider !== 'string' ||
+        typeof id !== 'string' ||
+        typeof name !== 'string'
+      )
+        return []
+      const thinkingValue = value['thinking']
+      let thinking: AvailableModel['thinking']
+      if (isRecord(thinkingValue) && Array.isArray(thinkingValue['efforts'])) {
+        const efforts = thinkingValue['efforts'].filter(
+          (effort): effort is string => typeof effort === 'string'
+        )
+        if (efforts.length > 0) {
+          const defaultLevel = thinkingValue['defaultLevel']
+          thinking = {
+            efforts,
+            ...(typeof defaultLevel === 'string' ? { defaultLevel } : {})
+          }
+        }
+      }
+      return [
+        {
+          provider,
+          id,
+          name,
+          reasoning: value['reasoning'] === true,
+          ...(thinking ? { thinking } : {})
+        }
+      ]
+    })
+  }
+
+  async loginProvider(providerId: string): Promise<void> {
+    if (!providerId.trim()) {
+      throw new RuntimeFailure('INVALID_ARGUMENT', 'Provider ID 无效', false)
+    }
+    if (this.#snapshot.isStreaming || this.#snapshot.queuedMessageCount > 0) {
+      throw new RuntimeFailure(
+        'RUNTIME_NOT_READY',
+        '任务运行期间不能登录 Provider',
+        true
+      )
+    }
+    if (this.#snapshot.isAuthenticating) {
+      throw new RuntimeFailure(
+        'RUNTIME_NOT_READY',
+        '已有 Provider 正在登录',
+        true
+      )
+    }
+    this.#setSnapshot({ isAuthenticating: true })
+    try {
+      await this.request({ type: 'login', providerId }, null)
+    } finally {
+      this.#setSnapshot({ isAuthenticating: false })
+    }
+  }
+
   async prompt(input: PromptInput): Promise<void> {
     this.#validatePrompt(input)
+    if (this.#snapshot.isAuthenticating) {
+      throw new RuntimeFailure(
+        'RUNTIME_NOT_READY',
+        'Provider 登录期间不能发送',
+        true
+      )
+    }
     if (this.#snapshot.isStreaming || this.#snapshot.queuedMessageCount > 0) {
       await this.followUp(input)
       return
@@ -235,6 +349,13 @@ export class RuntimeSupervisor extends EventEmitter {
 
   async followUp(input: PromptInput): Promise<void> {
     this.#validatePrompt(input)
+    if (this.#snapshot.isAuthenticating) {
+      throw new RuntimeFailure(
+        'RUNTIME_NOT_READY',
+        'Provider 登录期间不能发送',
+        true
+      )
+    }
     if (input.message.trimStart().startsWith('/')) {
       throw new RuntimeFailure(
         'INVALID_ARGUMENT',
@@ -255,6 +376,7 @@ export class RuntimeSupervisor extends EventEmitter {
       : null
     const sessionPath = this.#snapshot.sessionPath
 
+    this.#stoppingCurrentRun = true
     try {
       await this.request({ type: 'abort' }, this.#stopTimeoutMs)
       if (sessionPath) {
@@ -281,15 +403,19 @@ export class RuntimeSupervisor extends EventEmitter {
     this.#activeInput = null
     this.#queuedInputs = []
     this.#setSnapshot({ isStreaming: false, queuedMessageCount: 0 })
+    this.#stoppingCurrentRun = false
+    await this.#applyPendingModelSelectionSafely()
     return restoredInput
   }
 
   async newSession(): Promise<RuntimeSnapshot> {
+    await this.applyPendingModelSelection()
     await this.request({ type: 'new_session' }, MUTATION_TIMEOUT_MS)
     return this.getState()
   }
 
   async switchSession(sessionId: string): Promise<RuntimeSnapshot> {
+    await this.applyPendingModelSelection()
     const sessionPath = this.#trustedSessions.get(sessionId)
     if (!sessionPath) {
       throw new RuntimeFailure(
@@ -317,21 +443,71 @@ export class RuntimeSupervisor extends EventEmitter {
     return this.snapshot
   }
 
-  async setModel(provider: string, modelId: string): Promise<void> {
-    if (this.#snapshot.isStreaming || this.#snapshot.queuedMessageCount > 0) {
+  async selectModel(selection: ModelSelection): Promise<RuntimeSnapshot> {
+    this.#validateModelSelection(selection)
+    if (this.#snapshot.isAuthenticating) {
       throw new RuntimeFailure(
         'RUNTIME_NOT_READY',
-        '任务运行期间不能切换模型',
+        'Provider 登录期间不能切换模型',
         true
       )
     }
+    if (this.#snapshot.isStreaming || this.#snapshot.queuedMessageCount > 0) {
+      this.#pendingModelSelection = structuredClone(selection)
+      this.#setSnapshot({ pendingModelSelection: structuredClone(selection) })
+      return this.snapshot
+    }
+    return this.#applyModelSelection(selection)
+  }
+
+  cancelPendingModelSelection(): RuntimeSnapshot {
+    this.#pendingModelSelection = null
+    this.#setSnapshot({ pendingModelSelection: undefined })
+    return this.snapshot
+  }
+
+  async applyPendingModelSelection(): Promise<RuntimeSnapshot> {
+    if (
+      !this.#pendingModelSelection ||
+      this.#snapshot.isStreaming ||
+      this.#snapshot.queuedMessageCount > 0 ||
+      this.#snapshot.isAuthenticating
+    )
+      return this.snapshot
+    const selection = this.#pendingModelSelection
+    this.#pendingModelSelection = null
+    this.#setSnapshot({ pendingModelSelection: undefined })
+    return this.#applyModelSelection(selection)
+  }
+
+  async #applyModelSelection(
+    selection: ModelSelection
+  ): Promise<RuntimeSnapshot> {
+    const { provider, modelId, thinkingLevel } = selection
     if (!provider.trim() || !modelId.trim()) {
       throw new RuntimeFailure('INVALID_ARGUMENT', '模型参数无效', false)
     }
-    await this.request(
-      { type: 'set_model', provider, modelId },
-      MUTATION_TIMEOUT_MS
-    )
+    try {
+      await this.request(
+        { type: 'set_model', provider, modelId },
+        MUTATION_TIMEOUT_MS
+      )
+    } catch (error) {
+      await this.getState().catch(() => undefined)
+      throw error
+    }
+    if (thinkingLevel) {
+      try {
+        await this.request(
+          { type: 'set_thinking_level', level: thinkingLevel },
+          MUTATION_TIMEOUT_MS
+        )
+      } catch (error) {
+        await this.getState().catch(() => undefined)
+        throw error
+      }
+    }
+    return this.getState()
   }
 
   async setThinkingLevel(level: string): Promise<void> {
@@ -345,6 +521,13 @@ export class RuntimeSupervisor extends EventEmitter {
     if (!level.trim()) {
       throw new RuntimeFailure('INVALID_ARGUMENT', 'Thinking 等级无效', false)
     }
+    if (this.#snapshot.isAuthenticating) {
+      throw new RuntimeFailure(
+        'RUNTIME_NOT_READY',
+        'Provider 登录期间不能切换 Thinking 等级',
+        true
+      )
+    }
     await this.request(
       { type: 'set_thinking_level', level },
       MUTATION_TIMEOUT_MS
@@ -353,7 +536,7 @@ export class RuntimeSupervisor extends EventEmitter {
 
   async request(
     command: Record<string, unknown>,
-    timeoutMs = MUTATION_TIMEOUT_MS
+    timeoutMs: number | null = MUTATION_TIMEOUT_MS
   ): Promise<RpcResponse> {
     if (this.#snapshot.status === 'starting' && this.#startPromise) {
       await this.#startPromise
@@ -371,17 +554,22 @@ export class RuntimeSupervisor extends EventEmitter {
     const id = randomUUID()
     const generation = this.#generation
     return new Promise<RpcResponse>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.#pending.delete(id)
-        reject(new RuntimeFailure('RPC_TIMEOUT', 'OMP RPC 请求超时', true))
-      }, timeoutMs)
+      const timer =
+        timeoutMs === null
+          ? undefined
+          : setTimeout(() => {
+              this.#pending.delete(id)
+              reject(
+                new RuntimeFailure('RPC_TIMEOUT', 'OMP RPC 请求超时', true)
+              )
+            }, timeoutMs)
 
       this.#pending.set(id, { generation, resolve, reject, timer })
       child.stdin.write(`${JSON.stringify({ ...command, id })}\n`, (error) => {
         if (!error) return
         const pending = this.#pending.get(id)
         if (!pending) return
-        clearTimeout(pending.timer)
+        if (pending.timer) clearTimeout(pending.timer)
         this.#pending.delete(id)
         reject(new RuntimeFailure('CRASHED', '写入 OMP RPC 失败', true))
       })
@@ -419,6 +607,7 @@ export class RuntimeSupervisor extends EventEmitter {
       status: 'starting',
       workspacePath,
       isStreaming: false,
+      isAuthenticating: false,
       queuedMessageCount: 0,
       error: undefined
     })
@@ -466,10 +655,18 @@ export class RuntimeSupervisor extends EventEmitter {
       )
       return await this.getState()
     } catch (error) {
-      const failure =
+      let failure =
         error instanceof RuntimeFailure
           ? error
           : new RuntimeFailure('START_FAILED', String(error), true)
+      if (
+        failure.code === 'START_FAILED' &&
+        this.#recentDiagnostics.some((line) =>
+          line.includes('No models available.')
+        )
+      ) {
+        failure = new RuntimeFailure('OMP_UNCONFIGURED', 'OMP 尚未配置', true)
+      }
       this.#setSnapshot({
         status: 'failed',
         diagnosticSummary: this.#recentDiagnostics,
@@ -550,7 +747,7 @@ export class RuntimeSupervisor extends EventEmitter {
         )
         return
       }
-      clearTimeout(pending.timer)
+      if (pending.timer) clearTimeout(pending.timer)
       this.#pending.delete(id)
       if (frame.success) pending.resolve(frame)
       else {
@@ -580,12 +777,16 @@ export class RuntimeSupervisor extends EventEmitter {
         isStreaming: this.#activeInput !== null,
         queuedMessageCount: this.#queuedInputs.length
       })
+      if (this.#activeInput === null && !this.#stoppingCurrentRun)
+        void this.#applyPendingModelSelectionSafely()
     } else if (
       event.type === 'prompt_result' &&
       event['agentInvoked'] === false
     ) {
       this.#activeInput = null
       this.#setSnapshot({ isStreaming: false })
+      if (!this.#stoppingCurrentRun)
+        void this.#applyPendingModelSelectionSafely()
     }
   }
 
@@ -712,6 +913,7 @@ export class RuntimeSupervisor extends EventEmitter {
     try {
       await this.start(workspacePath, this.#workspaceEnv)
       if (sessionPath) await this.#restoreSession(sessionPath)
+      await this.#applyPendingModelSelectionSafely()
     } catch {
       // start() 已更新错误状态，等待用户手动重试。
     }
@@ -756,6 +958,33 @@ export class RuntimeSupervisor extends EventEmitter {
     }
   }
 
+  #validateModelSelection(selection: ModelSelection): void {
+    if (
+      !selection ||
+      typeof selection.provider !== 'string' ||
+      typeof selection.modelId !== 'string' ||
+      (selection.thinkingLevel !== undefined &&
+        typeof selection.thinkingLevel !== 'string') ||
+      !selection.provider.trim() ||
+      !selection.modelId.trim()
+    ) {
+      throw new RuntimeFailure('INVALID_ARGUMENT', '模型参数无效', false)
+    }
+  }
+
+  async #applyPendingModelSelectionSafely(): Promise<void> {
+    try {
+      await this.applyPendingModelSelection()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.#diagnostics.write(`待切换模型配置应用失败: ${message}`)
+      this.emit('event', {
+        type: 'model_selection_failed',
+        message
+      } satisfies OmpEvent)
+    }
+  }
+
   #setSnapshot(patch: Partial<RuntimeSnapshot>): void {
     this.#snapshot = { ...this.#snapshot, ...patch }
     this.emit('snapshot', this.snapshot)
@@ -763,7 +992,7 @@ export class RuntimeSupervisor extends EventEmitter {
 
   #rejectPending(error: RuntimeFailure): void {
     for (const pending of this.#pending.values()) {
-      clearTimeout(pending.timer)
+      if (pending.timer) clearTimeout(pending.timer)
       pending.reject(error)
     }
     this.#pending.clear()
