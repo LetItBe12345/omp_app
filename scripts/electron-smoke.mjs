@@ -8,6 +8,7 @@ await access('out/main/index.js', constants.R_OK)
 
 const useXvfb = process.platform === 'linux' && !process.env.DISPLAY
 const displayServer = process.env.OMP_DISPLAY_SERVER
+const softwareRendering = process.env.OMP_SMOKE_SOFTWARE_RENDERING === 'true'
 
 if (displayServer && !['x11', 'wayland'].includes(displayServer)) {
   throw new Error(`不支持的 OMP_DISPLAY_SERVER：${displayServer}`)
@@ -25,6 +26,7 @@ const explicitElectronArgs =
     : displayServer === 'wayland'
       ? ['--ozone-platform=wayland']
       : []
+if (softwareRendering) explicitElectronArgs.push('--disable-gpu')
 const command = displayServer
   ? electronBinary
   : useXvfb
@@ -43,7 +45,7 @@ const args = displayServer
     : ['out/main/index.js', '--smoke']
 
 console.log(
-  `Electron smoke 环境：arch=${process.arch} display=${displayServer ?? (useXvfb ? 'x11-xvfb' : 'auto')}`
+  `Electron smoke 环境：arch=${process.arch} display=${displayServer ?? (useXvfb ? 'x11-xvfb' : 'auto')} rendering=${softwareRendering ? 'software' : 'default'}`
 )
 
 const child = spawn(command, args, {
