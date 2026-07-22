@@ -28,6 +28,7 @@
 - [ ] 生产包排除测试、开发依赖、无用 source map 和参考仓库。
 - [ ] Main、Preload 和 Renderer 分别 bundle。
 - [ ] 使用 ASAR 管理应用代码，并正确解包原生依赖和 OMP。
+- [ ] 检查首屏 chunk 组成，确认模型管理、Markdown 高亮和后续大型能力没有意外进入首屏。
 
 ### Ubuntu 兼容
 
@@ -35,18 +36,32 @@
 - [ ] 在 Ubuntu X11 测试同一组主链路。
 - [ ] 测试 Intel、AMD 和 NVIDIA 常见图形环境。
 - [ ] GPU 默认开启。
-- [ ] 提供可选兼容模式，不作为默认值。
+- [ ] 提供重启后生效的图形兼容模式，不作为默认值。
+- [ ] 支持 `--disable-gpu` 作为黑屏时不依赖设置界面的救援入口。
+- [ ] 记录显示协议、兼容模式、GPU Feature Status 和 GPU 进程异常。
+- [ ] 在真实 GPU 上测试长对话滚动、流式输出、弹窗、缩放、黑屏、闪烁和透明窗口；Headless 软件渲染结果不代替该项。
 - [ ] 测试从图形启动器启动时的 Runtime PATH、Network Profile 和 OMP 发现。
 
 ### 性能回归
 
 - [ ] 记录 `process_start` 到 `first_paint`。
+- [ ] 记录 `interactive_ready` 和 `runtime_start`。
 - [ ] 记录 OMP `ready` 时间。
 - [ ] 记录首 token 延迟。
 - [ ] 记录首屏 Renderer JS gzip 大小。
 - [ ] 记录空闲 CPU 和内存。
 - [ ] 记录安装包和解压后大小。
+- [ ] 对比“创建窗口后立即启动 OMP”和“`renderer_ready` 后启动 OMP”的首屏、OMP ready、峰值 CPU 和内存，固定默认策略。
+- [ ] 冷启动和热启动分开测量，多次运行记录中位数。
+- [ ] 分别记录 Main、Renderer、GPU/Utility 和 OMP Runtime 的内存。
+- [ ] 分别记录流式开始、持续输出、结束和恢复空闲后的内存。
 - [ ] CI 保存指标并显示相对上一版本的变化。
+
+### 稳定性与资源边界
+
+- [ ] Runtime 日志写入队列设置待写字节上限，过载时丢弃并记录汇总，不让内存无界增长。
+- [ ] 应用退出等待日志写入使用有限超时，不因日志积压无限阻塞。
+- [ ] 长 Session、高频 Tool 输出和 stderr 洪泛压力测试不会导致持续内存增长或主线程长时间阻塞。
 
 ### 初始预算
 
@@ -67,6 +82,7 @@
 - [ ] CI 构建 Linux 安装包。
 - [ ] CI 检查打包产物中是否包含错误平台二进制或开发文件。
 - [ ] CI 记录构建产物大小。
+- [ ] CI 记录 Renderer 各 chunk 的原始大小和 gzip 大小。
 
 ### 人工验收主链路
 
@@ -99,7 +115,10 @@
 - 测试 Ubuntu 版本：未填写
 - Wayland 结果：未填写
 - X11 结果：未填写
+- 真实 GPU 结果：未填写
+- 图形兼容模式结果：未填写
 - AppImage 大小：未填写
+- 首屏 Renderer JS gzip：未填写
 - 空闲内存：未填写
 - OMP ready 时间：未填写
 - 首 token 延迟：未填写
