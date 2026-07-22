@@ -1,0 +1,5 @@
+allowBuilds:
+  electron: true
+  esbuild: true
+minimumReleaseAgeExclude:
+  - '@testing-library/jest-dom@7.0.0'

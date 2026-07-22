@@ -25,24 +25,24 @@ OMP Desktop 不是完整 IDE。
 
 ## 2. 总体布局
 
-采用三栏结构：
+采用三栏结构，栏目顺序以 `UI/16341.png` 为准：
 
 ```text
-┌── 项目与会话 ──┬────── 对话主区 ──────┬── 上下文面板 ──┐
-│ Workspace       │ 用户消息              │ Changes        │
-│ 会话列表         │ Assistant 输出        │ Files          │
-│ 搜索与新建       │ Thinking / Tool Call  │ Terminal       │
-│                 │ Permission / Diff     │ Browser 后续   │
-└────────────────┴───────────────────────┴────────────────┘
+┌── 对话概览 ──┬─── 文件树 ───┬────── 对话主区 ──────┐
+│ Workspace     │ 目录和文件   │ 用户消息              │
+│ 会话列表       │ 展开与折叠   │ Assistant 输出        │
+│ 搜索与新建     │ 文件搜索     │ Thinking / Tool Call  │
+│               │              │ Permission             │
+└───────────────┴──────────────┴──────────────────────┘
 ```
 
 明确规则：
 
-- 聊天记录放左侧。
+- 第一栏放 Workspace 和对话概览。
+- 第二栏固定为文件树。
+- 右侧为对话主区。
 - 不把历史聊天做成顶部浏览器标签。
-- 顶部标签只用于当前打开的文件、Diff、终端或网页。
-- 文件树放右侧上下文面板。
-- 右侧默认可折叠，避免长期占用聊天空间。
+- MVP 不建立 Terminal、Changes 或 Review/Diff 面板。
 
 ## 3. Workspace 与会话
 
@@ -66,7 +66,11 @@ MVP 不做复杂文件夹和多层标签系统。
 - 搜索会话。
 - 重命名会话。
 - 置顶和归档。
-- 多会话并行运行。
+- 保存、搜索和切换多个会话。
+
+MVP 只有一个长期运行的 OMP Runtime。同一时间只有当前 Session 可以生成，切换 Session 后再继续交互。
+
+多 Session 并行属于 MVP 之后的能力。届时一个正在生成的 Session 对应一个 OMP Runtime，并由 Settings 限制最大并行数量；闲置 Session 不长期占用进程。
 
 ## 4. `@` 引用
 
@@ -75,7 +79,8 @@ MVP 不做复杂文件夹和多层标签系统。
 - `@file`
 - `@folder`
 - `@session`
-- `@diff`
+
+`@diff` 随后续 Changes / Review / Diff 能力实现。
 
 `@session` 默认引用会话摘要和关键消息。
 
@@ -89,7 +94,7 @@ MVP 不做复杂文件夹和多层标签系统。
 - Thinking 流。
 - Tool Call 状态。
 - Permission 请求。
-- 文件改动和 Diff。
+- 文件改动的简短摘要。
 - 错误、重试和中断状态。
 
 交互规则：
@@ -110,9 +115,9 @@ MVP 支持：
 - 打开文件。
 - 文本预览。
 - 简单编辑和保存。
-- Git 状态。
-- Diff 查看。
 - 将文件或目录加入上下文。
+
+Git Changes、Review 和 Diff 在 MVP 之后实现。
 
 MVP 不做完整 IDE 能力：
 
@@ -153,22 +158,22 @@ OMP RPC Process
 - Host Tools。
 - Host URI。
 
-每个运行中的会话可以拥有独立 OMP RPC 进程。
+MVP 的单个 OMP Runtime 只能持有一个当前 AgentSession。Desktop 可管理多个 Session，但同一时间只允许当前 Session 生成。
 
-闲置会话只保留 Session 文件，不长期占用进程。
+MVP 之后可建立 Runtime 池：每个正在生成的 Session 使用独立 OMP RPC 进程，Settings 提供最大并行数量，达到上限时排队或提示用户处理。闲置 Session 只保留 Session 文件，不长期占用进程。
 
 参考：
 
 - <https://github.com/can1357/oh-my-pi/blob/main/docs/rpc.md>
 - <https://github.com/can1357/oh-my-pi/blob/main/docs/sdk.md>
 
-## 8. Terminal 与运行环境
+## 8. OMP Runtime 运行环境
 
 Desktop 从图形启动器启动时，不能假设拥有用户终端中的完整环境。
 
-Electron 启动 OMP 和 Terminal 时，需要显式管理环境。
+Electron 启动 OMP 时，需要显式管理环境。
 
-设置中提供 Environment Profile：
+设置中提供 Runtime Environment Profile：
 
 - Shell：bash、zsh、fish 或自定义路径。
 - 环境来源：系统环境、Login Shell、自定义环境。
@@ -185,23 +190,19 @@ which git
 which node
 which python
 PATH
-HTTP_PROXY
-HTTPS_PROXY
-ALL_PROXY
-NO_PROXY
 ```
 
-内置 Terminal 和 OMP 进程应使用同一份 Environment Profile。
+Runtime Environment Profile 只管理 Shell、PATH、普通环境变量和工作目录。代理由独立的 Runtime Network Profile 管理。
 
-## 9. 应用级代理
+## 9. OMP Runtime 网络设置
 
-OMP Desktop 必须支持应用级代理。
+OMP Desktop 不为 Electron 自身建立一套泛化代理。MVP 的网络设置用于生成 OMP Runtime 的启动环境。
 
 用户不需要开启 v2rayN 的系统代理、TUN 或全局模式。
 
-只要 v2rayN 提供本地 HTTP 或 SOCKS5 入站端口，应用即可使用代理。
+只要 v2rayN 提供本地 HTTP 或 SOCKS5 入站端口，Desktop 就可以在启动 OMP Runtime 时注入代理，无需修改操作系统的全局设置。
 
-设置提供三种模式：
+Runtime Network Profile 提供三种模式：
 
 1. 不使用代理。
 2. 使用系统代理。
@@ -215,22 +216,36 @@ OMP Desktop 必须支持应用级代理。
 - 用户名和密码，可选。
 - Bypass / NO_PROXY。
 
-代理必须同时覆盖三条链路：
+三种模式的解析规则：
 
-### 9.1 OMP 进程
+- 不使用代理：从最终环境中显式移除大小写代理变量。
+- 使用系统代理：保留 Desktop 启动环境中已有的大小写代理变量；未发现时明确报错，不静默直连。
+- 手动代理：用用户输入的值覆盖继承的代理变量。
 
-启动 OMP RPC 子进程时注入：
+### 9.1 OMP Runtime 与 RPC Bash
+
+Electron Main 在启动 `omp --mode rpc` 时，合并 Runtime Environment Profile 和 Runtime Network Profile，再通过 `spawn` 的 `env` 传入 OMP Runtime。
+
+代理变量包括大小写形式：
 
 - `HTTP_PROXY`
 - `HTTPS_PROXY`
 - `ALL_PROXY`
 - `NO_PROXY`
+- `http_proxy`
+- `https_proxy`
+- `all_proxy`
+- `no_proxy`
+
+RPC 只负责传输命令和事件。Agent 的 Bash Tool 由 OMP Runtime 实际执行，其子进程默认继承 Runtime 的 PATH、普通环境变量和代理变量。
+
+修改 Runtime Environment Profile 或 Runtime Network Profile 后，Desktop 必须重启 OMP Runtime，再恢复当前 Session。
 
 ### 9.2 内置 Terminal
 
-Terminal 使用相同环境变量。
+Terminal 在 MVP 之后实现。PTY 是独立于 OMP Runtime 的 Shell 进程，不参与 Agent Bash Tool 执行。
 
-这样 `git`、`curl`、`npm`、`pip` 等命令不依赖系统全局代理。
+Terminal 将拥有独立的环境与代理策略。它可以选择继承 Runtime Profile，也可选择不使用代理、使用系统代理或使用手动代理，不强制与 OMP Runtime 一致。
 
 ### 9.3 内置浏览器
 
@@ -238,12 +253,12 @@ Chromium Session 单独设置代理。
 
 浏览器代理不能只依赖 OMP 子进程环境变量。
 
-设置页提供“测试代理”功能，分别测试：
+设置页按已实现能力提供连通性测试：
 
 - OMP 模型接口。
-- GitHub。
-- Terminal 环境。
-- 内置浏览器。
+- RPC `bash` 的最终环境和网络访问。
+- Terminal 环境与网络访问（后续）。
+- 内置浏览器（后续）。
 
 ## 10. Browser Use
 
@@ -290,12 +305,10 @@ Ubuntu 首先考虑 Wayland。
 - Permission 审批。
 - 文件树和文件预览。
 - 简单编辑。
-- Diff 审查。
-- 内置 Terminal。
 - Model 和 Thinking 设置。
-- Environment Profile。
-- 应用级代理。
-- `@file`、`@folder`、`@session`、`@diff`。
+- Runtime Environment Profile。
+- Runtime Network Profile。
+- `@file`、`@folder`、`@session`。
 - OMP RPC 生命周期管理。
 
 MVP 暂不包含：
@@ -304,6 +317,10 @@ MVP 暂不包含：
 - 插件市场。
 - Computer Use。
 - 完整 Browser Use。
+- Changes / Review / Diff。
+- 内置 Terminal。
+- 多 Session 并行运行。
+- `@diff`。
 - 复杂会话目录。
 - 自研 Agent Runtime。
 
@@ -315,18 +332,29 @@ MVP 暂不包含：
 2. Workspace 和 Session。
 3. 流式对话。
 4. Tool Call 和 Permission。
-5. 文件树、预览和 Diff。
-6. Terminal。
-7. Environment Profile 和应用级代理。
+5. 文件树、预览和简单编辑。
+6. Runtime Environment Profile 和 Runtime Network Profile。
 
-### Phase 2：Browser Use
+### Phase 2：Review 与 Terminal
+
+1. Changed Files / Review 面板。
+2. 按文件查看 Diff，并支持 Accept / Revert 与 Open in Editor。
+3. 内置多标签 Terminal。
+
+### Phase 2.5：多 Session 并行
+
+1. 为每个正在生成的 Session 分配独立 OMP Runtime。
+2. 在 Settings 中设置最大并行数量。
+3. 达到上限时提供队列和明确提示。
+
+### Phase 3：Browser Use
 
 1. 内置浏览器。
 2. Browser Host Tools。
 3. 页面截图和交互。
 4. Cookie、下载和代理隔离。
 
-### Phase 3：Computer Use
+### Phase 4：Computer Use
 
 1. Ubuntu Wayland 权限链路。
 2. 屏幕理解。

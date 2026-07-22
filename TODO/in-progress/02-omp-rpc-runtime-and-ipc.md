@@ -30,6 +30,7 @@ MVP 只运行一个长期 OMP RPC 进程。
 - 不新增 WebSocket、gRPC 或 HTTP 服务。
 - 不为每个 Session 启动独立进程。
 - 不在 Renderer 重建 Agent 状态机。
+- 不在本任务实现 Runtime Environment / Network Profile 的解析策略，该策略属于 MVP-06。
 
 ## 任务清单
 
@@ -37,7 +38,7 @@ MVP 只运行一个长期 OMP RPC 进程。
 
 - [ ] 从应用资源中解析 `runtime/omp` 路径。
 - [ ] 使用活动 Workspace 作为 `--cwd` 启动 OMP。
-- [ ] 注入统一的环境变量和代理变量。
+- [ ] Runtime Supervisor 接收已解析的 Runtime `env`，并原样传入 `spawn`。
 - [ ] 逐行解析 stdout JSONL，保留不完整行缓冲区。
 - [ ] 等待 `ready` 后再允许发送命令。
 - [ ] 记录 stderr、退出码、信号和启动耗时。
@@ -83,6 +84,7 @@ MVP 只运行一个长期 OMP RPC 进程。
 - [ ] 使用假 OMP 进程测试 `ready → get_state → response`。
 - [ ] 保留并扩展 `scripts/rpc-smoke.mjs`。
 - [ ] 测试应用关闭后没有遗留 OMP 进程。
+- [ ] 用测试环境变量验证 Runtime `env` 注入有效；完整 Profile 和 RPC `bash` 继承验收由 MVP-06 完成。
 
 ## 完成条件
 

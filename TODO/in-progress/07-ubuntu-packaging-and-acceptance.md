@@ -36,7 +36,7 @@
 - [ ] 测试 Intel、AMD 和 NVIDIA 常见图形环境。
 - [ ] GPU 默认开启。
 - [ ] 提供可选兼容模式，不作为默认值。
-- [ ] 测试无终端环境启动时的 PATH、代理和 OMP 发现。
+- [ ] 测试从图形启动器启动时的 Runtime PATH、Network Profile 和 OMP 发现。
 
 ### 性能回归
 
@@ -59,8 +59,10 @@
 
 ### 自动化检查
 
-- [ ] CI 执行类型检查。
-- [ ] CI 执行单元测试。
+- [x] CI 执行类型检查。
+- [x] CI 执行单元测试。
+- [x] GitHub Hosted Runner 覆盖 Ubuntu 22.04、24.04 的 x64、arm64。
+- [x] 每个平台和架构分别运行 Xvfb X11 与 Weston headless Wayland smoke，并保存截图和诊断日志；headless Wayland 使用软件渲染并在成功标记后受控终止，不替代真实 GPU 和优雅退出验收。
 - [ ] CI 执行 RPC smoke test，无法提供真实凭据时使用明确的测试模式。
 - [ ] CI 构建 Linux 安装包。
 - [ ] CI 检查打包产物中是否包含错误平台二进制或开发文件。
@@ -75,16 +77,17 @@
 - [ ] 查看流式文本、Thinking 和 Tool Call。
 - [ ] 测试 Stop、Steer、Follow-up 和 Permission。
 - [ ] 切换 Session 并恢复历史。
-- [ ] 打开文件、保存修改并查看 Diff。
-- [ ] 打开 Terminal 并确认环境一致。
-- [ ] 配置手动代理并完成连通性测试。
+- [ ] 打开文件并保存简单修改。
+- [ ] 在不开启系统全局代理和 TUN 的条件下，配置 Runtime 手动代理并测试模型请求。
+- [ ] 通过 RPC `bash` 验证命令继承 Runtime 的 PATH、普通环境变量和代理变量。
+- [ ] 切换为不使用代理，重启 Runtime 后确认代理变量已移除。
 - [ ] 重启应用并恢复 Workspace、Session 和设置。
-- [ ] 退出后确认没有遗留 OMP 和 PTY 进程。
+- [ ] 退出后确认没有遗留 OMP 进程。
 
 ## 完成条件
 
 - [ ] Ubuntu AppImage 可以安装或直接运行。
-- [ ] 核心聊天、本地文件、Session、Terminal 和代理主链路通过。
+- [ ] 核心聊天、本地文件、Session、Runtime 环境和 Runtime 网络主链路通过。
 - [ ] CI 检查全部通过。
 - [ ] 性能指标已记录，超预算项有明确处理结论。
 - [ ] 安装包不包含 Browser Use、Computer Use 和无关平台资源。

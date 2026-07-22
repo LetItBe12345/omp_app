@@ -39,7 +39,7 @@ omp --mode rpc
 - 启动后首先输出：
 
 ```json
-{"type":"ready"}
+{ "type": "ready" }
 ```
 
 它不是 HTTP，也不是 gRPC，更不是标准 JSON-RPC 2.0。它本质是 **基于 stdio 的自定义 RPC 协议**。
@@ -48,49 +48,57 @@ omp --mode rpc
 
 # 二、全部 39 个 RPC 命令
 
-| 类别 | 命令 | 能做什么 |
-|---|---|---|
-| 对话 | `prompt` | 发送普通 Prompt，支持图片 |
-|  | `steer` | Agent 工作中插入指令 |
-|  | `follow_up` | 当前任务完成后继续执行 |
-|  | `abort` | 中止当前 Agent |
-|  | `abort_and_prompt` | 中止后立即发送新 Prompt |
-|  | `new_session` | 新建会话，支持父会话关系 |
-| 状态 | `get_state` | 获取完整运行状态 |
-|  | `get_available_commands` | 获取当前可用 Slash Commands |
-|  | `set_todos` | 设置当前 Todo 和阶段 |
-|  | `set_host_tools` | 注册 Electron 自己实现的工具 |
-|  | `set_host_uri_schemes` | 注册虚拟 URL/文件协议 |
-|  | `set_subagent_subscription` | 设置子 Agent 事件订阅级别 |
-|  | `get_subagents` | 获取当前子 Agent |
-|  | `get_subagent_messages` | 获取子 Agent 消息和日志 |
-| 模型 | `set_model` | 切换指定模型 |
-|  | `cycle_model` | 循环切换模型 |
-|  | `get_available_models` | 获取可用模型列表 |
-| Thinking | `set_thinking_level` | 设置推理等级 |
-|  | `cycle_thinking_level` | 循环切换推理等级 |
-| 消息队列 | `set_steering_mode` | 设置 Steering 消息处理方式 |
-|  | `set_follow_up_mode` | 设置 Follow-up 消息处理方式 |
-|  | `set_interrupt_mode` | 立即打断工具或等待当前 Turn 完成 |
-| 上下文 | `compact` | 手动压缩上下文 |
-|  | `set_auto_compaction` | 开关自动压缩 |
-| 重试 | `set_auto_retry` | 开关自动重试 |
-|  | `abort_retry` | 中止当前重试 |
-| Shell | `bash` | 直接执行 Shell 命令 |
-|  | `abort_bash` | 中止 Shell 命令 |
-| 会话 | `get_session_stats` | 获取 Token、费用等统计 |
-|  | `export_html` | 导出 HTML 会话 |
-|  | `switch_session` | 切换已有会话 |
-|  | `branch` | 从某条消息创建分支 |
-|  | `get_branch_messages` | 获取可以分支的用户消息 |
-|  | `get_last_assistant_text` | 获取最后一条助手文本 |
-|  | `set_session_name` | 设置会话名称 |
-|  | `handoff` | 生成 Handoff 并创建新上下文 |
-| 消息 | `get_messages` | 获取完整消息历史 |
-| 登录 | `get_login_providers` | 获取 OAuth Provider |
-|  | `login` | 执行 OAuth 登录 |
+| 类别     | 命令                        | 能做什么                         |
+| -------- | --------------------------- | -------------------------------- |
+| 对话     | `prompt`                    | 发送普通 Prompt，支持图片        |
+|          | `steer`                     | Agent 工作中插入指令             |
+|          | `follow_up`                 | 当前任务完成后继续执行           |
+|          | `abort`                     | 中止当前 Agent                   |
+|          | `abort_and_prompt`          | 中止后立即发送新 Prompt          |
+|          | `new_session`               | 新建会话，支持父会话关系         |
+| 状态     | `get_state`                 | 获取完整运行状态                 |
+|          | `get_available_commands`    | 获取当前可用 Slash Commands      |
+|          | `set_todos`                 | 设置当前 Todo 和阶段             |
+|          | `set_host_tools`            | 注册 Electron 自己实现的工具     |
+|          | `set_host_uri_schemes`      | 注册虚拟 URL/文件协议            |
+|          | `set_subagent_subscription` | 设置子 Agent 事件订阅级别        |
+|          | `get_subagents`             | 获取当前子 Agent                 |
+|          | `get_subagent_messages`     | 获取子 Agent 消息和日志          |
+| 模型     | `set_model`                 | 切换指定模型                     |
+|          | `cycle_model`               | 循环切换模型                     |
+|          | `get_available_models`      | 获取可用模型列表                 |
+| Thinking | `set_thinking_level`        | 设置推理等级                     |
+|          | `cycle_thinking_level`      | 循环切换推理等级                 |
+| 消息队列 | `set_steering_mode`         | 设置 Steering 消息处理方式       |
+|          | `set_follow_up_mode`        | 设置 Follow-up 消息处理方式      |
+|          | `set_interrupt_mode`        | 立即打断工具或等待当前 Turn 完成 |
+| 上下文   | `compact`                   | 手动压缩上下文                   |
+|          | `set_auto_compaction`       | 开关自动压缩                     |
+| 重试     | `set_auto_retry`            | 开关自动重试                     |
+|          | `abort_retry`               | 中止当前重试                     |
+| Shell    | `bash`                      | 直接执行 Shell 命令              |
+|          | `abort_bash`                | 中止 Shell 命令                  |
+| 会话     | `get_session_stats`         | 获取 Token、费用等统计           |
+|          | `export_html`               | 导出 HTML 会话                   |
+|          | `switch_session`            | 切换已有会话                     |
+|          | `branch`                    | 从某条消息创建分支               |
+|          | `get_branch_messages`       | 获取可以分支的用户消息           |
+|          | `get_last_assistant_text`   | 获取最后一条助手文本             |
+|          | `set_session_name`          | 设置会话名称                     |
+|          | `handoff`                   | 生成 Handoff 并创建新上下文      |
+| 消息     | `get_messages`              | 获取完整消息历史                 |
+| 登录     | `get_login_providers`       | 获取 OAuth Provider              |
+|          | `login`                     | 执行 OAuth 登录                  |
 
 这是源码 `RpcCommand` 联合类型中的完整列表。
+
+### Desktop 中的执行边界
+
+RPC 只负责传输命令、响应和事件。`bash` 由 OMP Runtime 实际执行，不经过 Desktop 的内置 Terminal 或 PTY。
+
+Desktop 启动 `omp --mode rpc` 时通过子进程 `env` 传入 PATH、普通环境变量和代理变量。OMP Runtime 后续启动的 Bash Tool 子进程默认继承这份最终环境。
+
+环境或代理发生变化时，Desktop 需要重启 OMP Runtime，再恢复当前 Session。
 
 ---
 
@@ -165,8 +173,6 @@ OMP 会主动向 Electron 推送：
 - Notice
 - Thinking 等级变化
 - Goal 状态变化
-
-
 
 ---
 
@@ -274,8 +280,6 @@ Agent 可以直接使用已有的 `read` 和 `write` 工具访问这些资源。
 - 独立 Session
 - 独立消息历史
 - 增量读取日志
-
-
 
 ---
 

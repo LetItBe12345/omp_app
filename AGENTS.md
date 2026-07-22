@@ -14,7 +14,7 @@
 - 回复或修改前，先检索相关代码、配置和文档。
 - 动手前先理解现有实现，只修改完成当前任务所需的部分。
 - 实现或修改 Desktop UI 前，必须先查看 `UI/16341.png`，并对照 `docs/product-spec.md`。
-- 优先复用仓库现有代码和成熟的开源实现。
+- 优先复用仓库现有代码和成熟的开源实现，能使用外部参考项目就使用，不要重复造轮子。
 - 优先最简单、可验证的实现，避免过度设计。
 - 不为极少发生的边界情况增加大量备用逻辑。
 - 保留用户的现有修改，不擅自回退或删除无关内容。
@@ -37,14 +37,20 @@
 - 任务和完成条件全部满足后，才能移入 `TODO/done/`。
 - 产品规则写入项目文档，可执行动作写入 TODO，避免重复。
 
-## 5. 验证与发布
+## 5. TODO 状态
+
+- 使用grill me skill 后 要将确定的内容以最小修改/添加的形式同步到TODO对应文件
+- 并将全部决策按条目写入/home/jin/开源/omp_app/decision/ 文件夹中的一个
+  文件内，并和todo编号保持一致。
+
+## 6. 验证与发布
 
 - 修改后执行与改动相匹配的检查和测试。
 - 没有验证过的结果必须明确说明，不能宣称已通过。
 - 提交、推送、创建 Tag 和发布 Release 是不同操作，不能相互代表授权。
 - 只有用户明确要求时，才能推送代码、创建 Tag 或发布 Release。
 
-## 6. 项目索引
+## 7. 项目索引
 
 - 产品定位、MVP 范围和界面规则见 `docs/product-spec.md`。
 - Desktop 分层、技术选型和性能原则见 `docs/desktop-architecture.md`。
@@ -52,7 +58,7 @@
 - OMP 二进制位于 `runtime/omp`；配置模型凭据后，使用 `runtime/omp --mode rpc` 启动，使用 `node scripts/rpc-smoke.mjs` 验证。
 - 当前 Desktop UI 视觉参考见 `UI/16341.png`；布局和交互以产品文档为准。
 
-## 7. 外部参考项目
+## 8. 外部参考项目
 
 - Desktop UI 和参考仓库的使用规则见 `docs/desktop-ui-implementation-and-reference-workflow.md`。
 - OpenCode：`../omp-references/opencode`；重点看 `packages/desktop/` 和 `packages/session-ui/`。
