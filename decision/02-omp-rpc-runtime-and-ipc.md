@@ -142,4 +142,4 @@
 101.  交互测试覆盖普通 Prompt、逐条 Follow-up、Slash Command 禁用、模型控件禁用、鼠标 Stop、`Ctrl+C`、文本复制、队列清空和 Prompt 恢复。
 102.  进程测试必须确认应用关闭、Stop、崩溃和重启后没有遗留 OMP 及其子进程。
 103.  保留并扩展 `scripts/rpc-smoke.mjs`；无真实凭据的 CI 使用明确的假 Runtime 模式，真实二进制 smoke 需要可用模型配置。
-104.  MVP-02 只验证最终 `env` 能传给 Runtime；完整 Runtime Profile、代理和 Agent Bash 继承由 MVP-07 验收。
+104.  MVP-02 只验证最终 `env` 能传给 Runtime；完整 Runtime Profile、代理和 Agent Bash 继承由 MVP-08 验收。

@@ -3,7 +3,7 @@
 - 状态：已完成
 - 优先级：P0
 - 前置任务：MVP-02
-- 后续任务：MVP-04、MVP-08
+- 后续任务：MVP-04
 
 ## 2026-07-22 执行记录
 
@@ -40,7 +40,7 @@
 - 不读取、修改或复制 OMP SQLite 凭据数据库。
 - 不维护 Desktop 自有 Provider 或模型目录。
 - 不实现 Runtime 当前没有暴露的完整多账号管理。
-- 不在本任务实现代理和 Runtime Environment Profile；MVP-07 负责环境与网络。
+- 不在本任务实现代理和 Runtime Environment Profile；MVP-08 负责环境与网络。
 
 ## 任务清单
 
