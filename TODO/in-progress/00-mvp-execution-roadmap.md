@@ -2,7 +2,7 @@
 
 - 状态：进行中
 - 阶段：Ubuntu MVP
-- 更新时间：2026-07-22
+- 更新时间：2026-07-23
 - 目标：把现有产品、架构和 RPC 文档转成可执行任务
 
 ## 已确定的实现边界
@@ -20,29 +20,25 @@
 
 - [x] [MVP-01：Electron 工程骨架](../done/01-electron-project-scaffold.md)
 - [x] [MVP-02：OMP RPC 与 IPC 主链路](../done/02-omp-rpc-runtime-and-ipc.md)
-- [ ] [MVP-03：模型授权、Provider 与模型选择](./03-model-authorization-provider-and-selection.md)
+- [x] [MVP-03：模型授权、Provider 与模型选择](../done/03-model-authorization-provider-and-selection.md)
 - [ ] [MVP-04：流式对话与执行轨迹](./04-streaming-conversation-and-run-trace.md)
 - [ ] [MVP-05：Workspace、Session 与上下文引用](./05-workspace-session-and-context.md)
-- [ ] [MVP-06：文件树与上下文引用](./06-files-preview-and-edit.md)
-- [ ] [MVP-07：OMP Runtime 环境与网络](./07-runtime-environment-and-network.md)
-- [ ] [MVP-08：Ubuntu 打包与 MVP 验收](./08-ubuntu-packaging-and-acceptance.md)
+- [ ] [MVP-06：Session 权限与工具审批](./06-session-permissions-and-tool-approvals.md)
+- [ ] [MVP-07：文件树与上下文引用](./07-files-preview-and-edit.md)
+- [ ] [MVP-08：OMP Runtime 环境与网络](./08-runtime-environment-and-network.md)
+- [ ] [MVP-09：Ubuntu 打包与 MVP 验收](./09-ubuntu-packaging-and-acceptance.md)
 
 ## MVP 之后
 
-- [ ] [POST-MVP-01：Changes、Review 与 Diff](./09-changes-review-and-diff.md)
-- [ ] [POST-MVP-02：内置多标签 Terminal](./10-multi-tab-terminal.md)
-- [ ] [POST-MVP-03：多 Session 并行 Runtime](./11-parallel-session-runtimes.md)
+- [ ] [POST-MVP-01：Changes、Review 与 Diff](./10-changes-review-and-diff.md)
+- [ ] [POST-MVP-02：内置多标签 Terminal](./11-multi-tab-terminal.md)
+- [ ] [POST-MVP-03：多 Session 并行 Runtime](./12-parallel-session-runtimes.md)
 
 ## 依赖关系
 
 ```text
-MVP-01
-  ├─ MVP-02 ─ MVP-03 ─ MVP-04 ─ MVP-05
-  ├─ MVP-06
-  └─ MVP-07
-
-MVP-02 + MVP-03 + MVP-04 + MVP-05 + MVP-06 + MVP-07
-  └─ MVP-08
+MVP-01 → MVP-02 → MVP-03 → MVP-04 → MVP-05
+  → MVP-06 → MVP-07 → MVP-08 → MVP-09
 ```
 
 ## MVP 总体验收
@@ -54,6 +50,7 @@ MVP-02 + MVP-03 + MVP-04 + MVP-05 + MVP-06 + MVP-07
 - [ ] 回复完成后，执行过程自动折叠，最终回答保持突出。
 - [ ] 可以停止当前执行链，并按顺序处理 Follow-up。
 - [ ] 可以创建、切换和恢复 Session。
+- [ ] 每个 Session 可以保存“严格”“标准”或“全部允许”，并完成工具审批。
 - [ ] 可以浏览和搜索文件，并将文件或目录加入上下文。
 - [ ] 可以控制 OMP Runtime 使用或不使用代理，不依赖系统全局代理。
 - [ ] 安装包、空闲资源和首屏体积不超过架构文档中的回归预算。

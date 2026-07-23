@@ -144,7 +144,7 @@ Electron
 └── TanStack Virtual（长列表出现时）
 ```
 
-MVP-01 只接入 Tailwind CSS 4、`lucide-react` 和 `react-resizable-panels`。`electron-builder` 在 MVP-08 接入；Radix UI、assistant-ui 和 TanStack Virtual 在首次出现真实需求时再接入。
+MVP-01 只接入 Tailwind CSS 4、`lucide-react` 和 `react-resizable-panels`。`electron-builder` 在 MVP-09 接入；Radix UI、assistant-ui 和 TanStack Virtual 在首次出现真实需求时再接入。
 
 样式边界：
 
@@ -185,6 +185,31 @@ omp
 ```
 
 参考仓库不要放进 `omp_app/`，也不要加入当前 Git 仓库。
+
+在 `omp_app` 根目录执行：
+
+```bash
+scripts/clone-reference-repos.sh
+```
+
+脚本会把四个仓库浅克隆到 `../omp-references/`。如需使用其他位置，将目标
+目录作为第一个参数传入：
+
+```bash
+scripts/clone-reference-repos.sh /path/to/omp-references
+```
+
+已有目录必须是对应的 Git 仓库。脚本不会覆盖已有目录，也不会自动更新或
+修改已有参考仓库。
+
+2026-07-23 初始化的参考版本：
+
+| 仓库         | 分支 | Commit                                     |
+| ------------ | ---- | ------------------------------------------ |
+| opencode     | dev  | `62e4641235d7847dadc60da37cca8a023dd54fc1` |
+| assistant-ui | main | `70347f0e8dc9256fc1839cd9b9eebc2521022913` |
+| ohmypi-craft | main | `1671920dffe31aee58fc60ba57268cb94abe1776` |
+| oh-my-pi     | main | `639bac596d94b5993349f3f6696176cb2bf9b5d3` |
 
 ## 7. 浅克隆和稀疏检出
 
@@ -264,8 +289,11 @@ git rev-parse HEAD
 3. 接入最小聊天界面和流式文本。
 4. 实现 Thinking/Tool Trace 的运行时展开和完成后折叠。
 5. 接入会话列表和项目工作目录。
-6. 接入文件树、搜索和文件/目录上下文引用。
-7. MVP 之后接入 Changes / Review / Diff 和多标签 Terminal。
-8. 最后处理内置浏览器、Browser Use 和 Computer Use。
+6. 接入 Session 权限和工具审批。
+7. 接入文件树、搜索和文件/目录上下文引用。
+8. 接入 Runtime 环境和网络配置。
+9. 完成 Ubuntu 打包与 MVP 验收。
+10. MVP 之后接入 Changes / Review / Diff 和多标签 Terminal。
+11. 最后处理内置浏览器、Browser Use 和 Computer Use。
 
 第一阶段只解决核心聊天和本地代码任务。不要提前扩大范围。

@@ -1,6 +1,6 @@
 # 决策记录 03：模型授权、Provider 与模型选择
 
-- 对应任务：`TODO/in-progress/03-model-authorization-provider-and-selection.md`
+- 对应任务：`TODO/done/03-model-authorization-provider-and-selection.md`
 - 状态：已确认
 - 确认日期：2026-07-22
 

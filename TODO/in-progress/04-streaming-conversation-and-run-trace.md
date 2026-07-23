@@ -2,12 +2,12 @@
 
 - 状态：未开始
 - 优先级：P0
-- 前置任务：MVP-02、MVP-03
-- 后续任务：MVP-05、MVP-08
+- 前置任务：MVP-03
+- 后续任务：MVP-05
 
 ## 目标
 
-完成最小聊天闭环，并正确展示文本、Thinking、Tool Call 和 Permission。
+完成最小聊天闭环，并正确展示文本、Thinking、Tool Call 和通用 Interaction。
 
 ## 核心交互
 
@@ -24,9 +24,22 @@
 - 不把 Thinking 和每次 Tool Call 渲染成独立聊天消息。
 - 不展示模型未提供的隐藏推理。
 - 不在每个 token 到达时触发一次完整 React 更新。
+- 不重新实现 assistant-ui 已提供的 Thread、Message、Composer、自动滚动、工具分组和 Markdown 流式渲染。
+- 不解析 Interaction 的 `title` 来猜测 `toolCallId`；OMP v17.0.6 的 `extension_ui_request` 没有结构化的工具关联字段。
+- 不在性能测试证明有必要前接入虚拟列表或自建 Markdown AST 缓存。
 - 不先实现复杂主题系统和富媒体组件市场。
 
 ## 任务清单
+
+### 复用与适配
+
+- [ ] 固定使用 `@assistant-ui/react` 0.14.27 和 `@assistant-ui/react-markdown` 0.14.6，不使用范围版本，也不引入 assistant-ui 的整套预制 UI 包。
+- [ ] 接入 `@assistant-ui/react` 的 `ExternalStoreRuntime`，由现有 OMP 状态持有消息和运行状态，不建立第二份会话存储。
+- [ ] 使用 assistant-ui 的 Thread、Message、Composer、`MessagePrimitive.GroupedParts`、Reasoning 和 ToolGroup 原语。
+- [ ] 使用 `@assistant-ui/react-markdown` 的 `defer` 和 memo 能力渲染流式 Markdown，不先编写自定义解析缓存。
+- [ ] 将 OMP `abort` 接入 assistant-ui 的取消回调，将 OMP `follow_up` 接入运行中 FIFO 队列。
+- [ ] OpenCode Session UI 只作为 Context Tool 分组、摘要和折叠规则的参考；其组件使用 SolidJS，不直接复制到 React Renderer。
+- [ ] OMP TUI、`collab-web` 和 ohmypi-craft 只复用与当前 RPC 事件相符的归并规则、类型和测试样例，不复制各自的完整状态管理。
 
 ### 数据模型
 
@@ -39,26 +52,31 @@
 - [ ] 正确处理 `message_start/update/end`；把 `message_update` 视为累计快照并替换当前消息投影，禁止重复追加。
 - [ ] 正确处理 Thinking 增量。
 - [ ] 使用 `toolCallId` 归并 Tool Call 参数、进度、结果和错误。
+- [ ] 重复 Start 只更新同一 Action；Update 或 End 先到时创建占位 Action，Start 后到时补全字段；End 后忽略更晚的旧 Progress。
+- [ ] `agent_end` 或历史恢复时仍缺少 Tool End 或 Tool Result 的 Action 标记为“未完整结束”；冲突字段以最新事件为准并记录诊断警告。
 - [ ] 将 Action 分类为 `context`、`command`、`edit`、`subagent` 和 `external`，无法可靠识别时保留原始工具信息并回退到 `external`。
-- [ ] 连续的 Read、Grep、Glob、List 和 Web Search 等低价值工具聚合为一个 Context Action；遇到 Narrative、Interaction 或其他 Action 时结束当前聚合。
-- [ ] Interaction 与对应 Action 建立关联；处理后只收起交互控件，保留 Action 最终状态和历史。
+- [ ] Context 白名单固定为 `read`、`grep`、`glob`、`find`、`ls`、`web_search`、`fetch`；只聚合连续且成功的白名单工具，失败、拒绝或中止的工具单独显示，未知工具不做模糊名称匹配。
+- [ ] Interaction 按 RPC 到达顺序插入投影；只有当前唯一待执行 Tool Call 能够可靠确定时才关联 Action，否则保留为 Run 级 Interaction，不猜测 `toolCallId`。
+- [ ] Interaction 处理后只收起交互控件；已可靠关联时保留对应 Action 的最终状态和历史。
 - [ ] Lifecycle 只驱动运行状态和控制组件，不生成普通聊天消息。
 - [ ] 正确处理 Agent、Turn、Retry、Compaction 和 Notice 状态。
 - [ ] 实现纯函数形式的最终回答分类规则，覆盖无工具消息和最后一个 Tool Call 后的结尾文本。
-- [ ] 只有成功的 `agent_end` 才执行最终分类；失败、中止、等待 Permission 或信息不足时保留完整轨迹。
-- [ ] 历史消息恢复与实时事件使用同一投影函数和最终回答分类规则。
+- [ ] 收到 `agent_end` 后检查本次 Run 最后一条 Assistant Message；只有 `stopReason === "stop"`，且不存在未完成 Interaction 时才执行最终分类。
+- [ ] `agent_end` 本身不含成功字段；不得只凭事件类型判断成功。`length`、`error`、`aborted`、等待 Interaction 或信息不足时保留完整轨迹。
+- [ ] 正常 `stop` 但没有非空最终文本时仍按已完成状态折叠，不渲染空的 Assistant 消息区域。
+- [ ] 历史消息恢复与实时事件使用同一投影函数和最终回答分类规则；重开 Session 时不要求恢复临时进度、动画、已处理的 Interaction 控件和中间 Lifecycle 状态。
+- [ ] 历史中以可见用户消息划分 Assistant Turn；隐藏合成消息不生成用户气泡也不切断 Turn，历史开头的无用户 Assistant 内容建立独立 Turn。
 
 ### 流式性能
 
-- [ ] 将高频增量写入内存 buffer。
-- [ ] 每 16–33 ms 合并一次 UI 更新。
-- [ ] 为单个 IPC 事件批次同时设置事件数量和累计字节数上限，达到任一上限立即发送。
+- [ ] 复用现有 `runtime-ipc.ts` 的内存事件批次和 24 ms 定时刷新，不另建第二套批处理。
+- [ ] 单个 IPC 批次最多 100 个事件或 256 KiB 的 JSON 估算大小，达到任一上限立即发送；单个超限事件单独发送，不拆分 RPC 事件。
 - [ ] 只更新当前 Assistant Turn。
 - [ ] 原始 RPC 事件处理后释放，Reducer、React 和 assistant-ui 不重复保存完整消息。
-- [ ] 已完成 Markdown 结果使用有上限的缓存，不重复解析完整历史。
-- [ ] 长对话使用虚拟列表或等价方案。
-- [ ] Tool Call 进度更新限频。
-- [ ] Tool Call 大输出只渲染受控窗口或摘要，不在多个状态中保留完整副本。
+- [ ] 使用 assistant-ui 默认的 `content-visibility`、稳定消息 ID 和 Markdown `defer`/memo，避免重复渲染屏幕外历史和阻塞流式更新。
+- [ ] 先用长 Session 性能测试确认 React 挂载成本；只有默认方案不能满足预算时，才按 assistant-ui 官方示例接入 TanStack Virtual。
+- [ ] 每个 `toolCallId` 的进度最多每 100 ms 更新一次；新进度覆盖未渲染的旧进度，结束、错误和 Interaction 立即刷新，最终结果丢弃旧进度。
+- [ ] Tool 原始输出不在过程区域另设详情层；只显示结构化结果摘要和完整错误，完整结果从 OMP Session 提供复制，不全部挂载到 DOM。
 - [ ] 图片数据处理完成后释放重复 Base64 副本。
 
 ### UI
@@ -66,17 +84,34 @@
 - [ ] 用户消息靠右，使用紧凑的极浅灰背景。
 - [ ] Assistant 消息靠左，白底黑字，不使用头像和气泡。
 - [ ] 当前执行轨迹在生成时展开，普通文本、Thinking 和工具信息按 OMP 原始顺序流式更新。
-- [ ] 成功结束时只重分类一次：把最终文本移到轨迹外，其余内容折叠为“耗时、工具数、状态”的单行摘要。
-- [ ] 展开已完成轨迹后恢复全部过程内容的原始顺序，不把工具集中到独立区域。
+- [ ] 成功结束时只重分类一次：把最终文本移到轨迹外，其余内容折叠为低对比度的“思考了多久、工具数、状态”单行摘要。
+- [ ] 摘要耗时为 `agent_start` 到 `agent_end` 的时间减去等待 Interaction 的时间；显示整数秒，不足 1 秒显示“少于 1 秒”。
+- [ ] 摘要工具数按唯一 `toolCallId` 统计，包含失败、拒绝和中止的调用；工具数为零时省略。
+- [ ] 状态文案固定为“进行中”“重试中”“等待操作”“已完成”“已完成 · 记录不完整”“输出不完整”“失败”和“已中止”。
+- [ ] 运行中摘要的耗时每秒更新一次，工具数只在出现新 `toolCallId` 时更新；等待 Interaction 时暂停计时，自动重试时继续计时。
+- [ ] 重开 Session 后只在能够可靠计算时显示耗时，否则省略；工具数和状态从 OMP 历史消息重建，不增加摘要数据库。
+- [ ] 浅色摘要整行可点击，不显示“展开全文”等文案；点击一次后恢复全部过程内容的原始顺序，不把工具集中到独立区域。
+- [ ] 浅色摘要使用原生 `button` 语义，支持 Enter、空格、`aria-expanded`、`aria-controls` 和键盘焦点；收起前将区域内焦点移回摘要。
+- [ ] 展开过程不隐藏中间项，也不为 Thinking、Context 子项或 Tool Call 增加第二层展开；过程区域最大高度为 `min(60vh, 640px)`，超出后在区域内滚动。
 - [ ] 同一段最终文本只渲染一次，移动到最终回答区域后不在轨迹中保留副本。
-- [ ] Tool Call 默认只显示名称、状态和一行摘要，可以再次展开查看输入、完整输出和错误。
-- [ ] Context Action 默认显示文件数、搜索数和状态摘要；展开后恢复内部工具操作的原始顺序。
-- [ ] Permission 请求显示在对应 Tool Call 的原始位置，并滚动到该位置，不打开居中模态框。
-- [ ] Permission 只显示 OMP RPC 实际提供的选项；v17.0.6 通用工具审批使用 `Approve` 和 `Deny`，不自行增加授权范围。
+- [ ] 展开过程显示 OMP 提供的完整 Thinking 和过程说明；`redactedThinking` 只显示“思考内容不可用”，不显示原始数据。
+- [ ] Tool Call 在过程内以名称、主要参数、最终状态和结构化结果摘要占一行，不提供第二层卡片展开。
+- [ ] Tool Call 摘要只使用结构化字段，优先显示文件路径、搜索词、命令首行或目标名称；摘要只占一行，按可用宽度省略，不设置固定字符上限；无法可靠生成时只显示名称和状态。
+- [ ] 运行中 Context Action 聚合为一行实时摘要；文件数按结构化规范化路径去重，搜索数按实际调用次数统计，字段不足时显示实际操作次数，不解析工具输出补数字。
+- [ ] 点击 Run 摘要后直接恢复 Context Action 内部每个工具操作的原始顺序，不要求再次点击 Context 分组。
+- [ ] `extension_ui_request: select` 统一按通用 Interaction 渲染，原样显示 OMP 的 `title` 和 `options`，不根据标题或方法生成审批语义。
+- [ ] Interaction 显示在事件到达时的原始位置并滚动到该位置，不打开居中模态框；只有当前唯一待执行 Tool Call 能够可靠确定时才显示在对应 Action 内。
 - [ ] 文件改动只显示 RPC 原始结果能够可靠提供的简短摘要，不在 MVP 聚合 Run 级 ChangeSet，也不在对话流展开完整 Diff。
-- [ ] 自动滚动只在用户位于底部附近时生效。
-- [ ] 用户主动向上滚动后停止自动跟随，并显示“有新内容”；点击后回到底部并恢复自动跟随。
-- [ ] 已完成轨迹的手动展开状态不持久化；重新打开 Session 时，成功任务折叠，失败和等待 Permission 的任务展开。
+- [ ] 使用 assistant-ui `ThreadPrimitive.Viewport` 的自动跟随；只在用户位于底部附近时跟随新内容。
+- [ ] 使用 assistant-ui 的 Viewport 状态和 `ScrollToBottom`；用户主动向上滚动后停止跟随并显示“有新内容”，点击后回到底部。
+- [ ] 过程区域向上滚动后停止内部跟随，右下角只显示悬浮向下箭头；不显示“有新内容”文字、未读数或弹窗，点击后回到底部并恢复跟随。
+- [ ] 已完成任务展开后从过程顶部开始；运行中默认停在底部。收起后再次展开回到顶部，不保存内部滚动位置。
+- [ ] 过程区域滚到顶部或底部后，继续滚轮操作可以自然带动外层聊天页面。
+- [ ] 用户可以在运行中手动折叠；后续普通事件不强制展开，Interaction 到达时自动展开并滚动到交互位置。
+- [ ] 用户位于底部附近时，正常结束后立即折叠；用户已向上滚动时保持展开，回到底部或点击“收起”后再折叠。
+- [ ] 已完成轨迹的手动展开状态不持久化；重新打开 Session 时，成功任务折叠，失败和等待 Interaction 的任务展开。
+- [ ] `stop` 但 Action 记录不完整时仍默认折叠，摘要显示“已完成 · 记录不完整”。
+- [ ] Markdown 禁止原始 HTML；网页链接经 Main 校验后用系统浏览器打开，拒绝未允许协议，远程图片不自动加载，代码块不提供直接执行。
 
 ### 输入区
 
@@ -90,17 +125,12 @@
 - [ ] 显示连接、生成、重试和错误状态。
 - [ ] 禁止重复提交同一输入。
 
-### 权限
+### 通用 Interaction
 
-- [ ] 在模型和 Thinking Level 旁增加固定文案为“权限”的控制按钮，不使用“盾牌”或“工作区写入”作为按钮名称。
-- [ ] 权限 Popover 显示 `always-ask`、`write`、`yolo` 三种 OMP 审批模式及各自会自动允许的工具等级。
-- [ ] 当前 Workspace 没有保存值时使用 `write`；按规范化 Workspace 路径将选择保存到 Desktop 数据目录，不修改项目 `.omp/config.yml`。
-- [ ] 在 `RuntimeSnapshot` 和受控 IPC 中加入 Desktop 当前使用的权限模式，不把 Renderer 显示值建立在无法读取的 OMP 内部状态上。
-- [ ] 启动 Runtime 时追加 `--approval-mode <mode>`；权限修改后重启 Runtime，并恢复原 Session。
-- [ ] Runtime 正在执行、Follow-up 队列非空或等待 Permission 时禁用权限切换。
-- [ ] 切换到 `yolo` 前显示风险确认，取消后不修改配置、不重启 Runtime。
-- [ ] 将 OMP `extension_ui_request: select` 审批请求接入对应 Tool Call，并通过 `respondExtensionUi` 回传选择。
-- [ ] MVP 不实现单工具 `allow`、`prompt`、`deny` 规则编辑器。
+- [ ] 将 OMP `extension_ui_request` 接入 Run 投影，并通过受控 IPC 和 `respondExtensionUi` 原样回传用户选择。
+- [ ] `select` 原样显示 OMP 的 `title` 和 `options`；Interaction 按 RPC 原始位置渲染，不生成工具审批语义。
+- [ ] 只有当前唯一待执行 Tool Call 能够可靠确定时才关联对应 Action，否则保留为 Run 级 Interaction。
+- [ ] Main 持有未处理 Interaction；Renderer 重载后从 `RuntimeSnapshot` 恢复，不重复响应已经结束的请求。
 
 ### 测试
 
@@ -108,24 +138,42 @@
 - [ ] 测试连续 `message_update` 累计快照不会造成文本重复。
 - [ ] 测试“过程文本 → 工具 → 最终文本”和单条混合 assistant 消息都保持原始顺序。
 - [ ] 测试多个 Tool Call 按 `toolCallId` 配对结果，且中间普通文本不会被移到错误位置。
-- [ ] 测试连续 Context Action 能够聚合；遇到普通文本、Permission、命令或编辑操作时正确切断分组。
+- [ ] 测试连续 Context Action 能够聚合；遇到普通文本、Interaction、命令或编辑操作时正确切断分组。
+- [ ] 测试 Context Action 在结构化文件信息缺失时回退为操作数，不解析结果文本。
 - [ ] 测试未知工具回退为 `external`，并保留工具名称、输入、结果和错误。
-- [ ] 测试 Interaction 处理后移除控件但不删除 Action，Lifecycle 不生成聊天卡片。
+- [ ] 测试 Interaction 能可靠确定唯一 Tool Call 时建立关联，存在多个候选或没有候选时保留为 Run 级 Interaction。
+- [ ] 测试 Interaction 处理后移除控件但不删除已关联的 Action，Lifecycle 不生成聊天卡片。
 - [ ] 测试无工具的正常结尾、最后一个工具后的结尾文本和无法判断最终回答三类分类结果。
+- [ ] 测试正常 `stop` 且没有非空最终文本时只显示已完成摘要，不产生空消息。
+- [ ] 测试 `agent_end` 携带 `stop`、`length`、`error` 和 `aborted` Assistant Message 时，只对 `stop` 执行最终分类。
 - [ ] 测试成功重分类后最终文本只出现一次，稳定 key 不因折叠产生重复节点。
 - [ ] 测试运行中展开、成功折叠、失败保持展开。
+- [ ] 测试运行中手动折叠不会被普通事件重新打开，Interaction 会自动展开并滚动到原始位置。
+- [ ] 测试用户位于底部时成功后立即折叠，向上滚动阅读时延后折叠。
+- [ ] 测试摘要耗时排除 Interaction 等待时间、唯一 `toolCallId` 计数、零工具省略和全部固定状态文案。
+- [ ] 测试运行中摘要每秒更新、工具数按新 ID 更新、等待时暂停和重试时继续计时。
+- [ ] 测试历史耗时可恢复与不可恢复两条路径，确认不可恢复时省略且不伪造数值。
+- [ ] 测试可见用户消息、隐藏合成消息和历史开头无用户消息的 Turn 划分。
+- [ ] 测试 `stop` 且 Action 记录不完整时默认折叠，并显示“已完成 · 记录不完整”。
 - [ ] 测试历史恢复和实时事件生成相同的 Assistant Turn，且不会重复消息。
 - [ ] 测试主动向上滚动时停止跟随、“有新内容”恢复跟随和底部附近自动滚动。
-- [ ] 测试 Tool Call 摘要默认折叠，输入、输出和错误可以独立展开。
-- [ ] 测试成功轨迹的展开状态不会跨 Session 重开保留，失败和等待 Permission 仍展开。
-- [ ] 测试三个权限模式的启动参数、Workspace 隔离、默认 `write` 和 Runtime 重启后的 Session 恢复。
-- [ ] 测试执行中、Follow-up 排队和等待 Permission 时不能切换权限。
-- [ ] 测试切换到 `yolo` 的确认与取消路径。
-- [ ] 使用 Fake OMP 测试 Permission 请求的显示、允许、拒绝、取消和 Renderer 重载恢复。
+- [ ] 测试过程区域停止跟随时只显示悬浮向下箭头，点击恢复底部跟随；完成态展开从顶部开始，重新展开重置位置。
+- [ ] 测试过程区域滚到边界后滚轮可以继续驱动外层聊天页面。
+- [ ] 测试摘要的 button 语义、键盘操作、ARIA 状态和收起时的焦点恢复。
+- [ ] 测试点击摘要一次即可显示全部 Thinking、过程说明和 Tool Call，Context 子项恢复原始顺序且不存在第二层展开控件。
+- [ ] 测试过程区域不超过 `min(60vh, 640px)`，超出后区域内滚动，最终回答仍位于摘要和过程区域之后。
+- [ ] 测试 Tool Call 的结构化摘要、160 字符上限、未知字段回退、完整错误显示和原始结果复制。
+- [ ] 测试 Context 白名单、成功连续聚合、失败项切断、路径去重、调用次数和字段缺失回退。
+- [ ] 测试成功轨迹的展开状态不会跨 Session 重开保留，失败和等待 Interaction 仍展开。
+- [ ] 使用 Fake OMP 测试通用 `select` 的显示、选择、取消和 Renderer 重载恢复。
 - [ ] 测试长文本和高频 token 下的更新次数。
 - [ ] 测试事件批次达到时间、数量和字节数任一上限时都会发送。
+- [ ] 测试每个 Tool Call 的 100 ms 进度限频、覆盖旧进度、结束立即刷新和完成后不发生状态倒退。
+- [ ] 测试超大 Tool 输出不挂载到过程 DOM，图片、Base64 和二进制内容不进入过程区域，完整结果仍可复制。
 - [ ] 测试长 Session 持续输出后内存不会无界增长，并能在结束后稳定。
-- [ ] 测试 Markdown 缓存淘汰后可以按需重新生成。
+- [ ] 测试 Markdown `defer` 下流式文本最终内容完整，历史消息更新不会触发无关消息重复渲染。
+- [ ] 测试 Markdown 原始 HTML、危险链接协议和远程图片不会在 Renderer 执行或自动加载，允许的网页链接由 Main 打开。
+- [ ] 记录默认 `content-visibility` 方案的长 Session 性能；只有不满足预算时才增加并测试虚拟列表。
 - [ ] 测试 Stop、逐条 Follow-up、队列清空、快捷键冲突和控件禁用状态。
 
 ## 完成条件
@@ -133,18 +181,22 @@
 - [ ] 用户发送 Prompt 后可以看到连续流式文本。
 - [ ] Thinking 和 Tool Call 在运行中可实时更新。
 - [ ] 成功完成后执行轨迹自动折叠。
-- [ ] 失败或等待 Permission 时执行轨迹保持展开。
+- [ ] 失败或等待 Interaction 时执行轨迹保持展开。
+- [ ] 点击浅色摘要一次可以按原始顺序查看完整过程，且长过程不会把聊天页面无限撑高。
 - [ ] 重新打开 Session 后消息结构和折叠状态正确。
-- [ ] 每个 Workspace 可以选择权限模式，重启 Desktop 后选择仍正确，实际 OMP 启动参数与界面一致。
-- [ ] 需要确认的工具会在原位置等待用户允许或拒绝，拒绝时不会执行工具。
-- [ ] 高频输出时界面无明显卡顿。
+- [ ] 通用 Interaction 会在事件原位置等待用户选择；能够可靠关联时显示在对应 Action 内。
+- [ ] 载入 1,000 条历史消息后，以每秒 100 个 RPC 事件持续输出 60 秒；事件到可见延迟 P95 不超过 100 ms，且没有超过 100 ms 的主线程长任务。
+- [ ] 输出结束并执行测试环境可用的 GC 后，内存不再持续增长。
 - [ ] reducer 和关键交互测试通过。
 
 ## 复用重点
 
-- assistant-ui：Thread、Message、Composer、自动滚动、流式原语和内容分组部件。
-- OMP TUI 与 `collab-web`：混合内容的原始顺序、`toolCallId` 配对和最小事件归并规则。
+- assistant-ui `ExternalStoreRuntime`：连接现有 OMP 消息状态、运行状态、取消和 Follow-up 队列。
+- assistant-ui Thread、Message、Composer、GroupedParts、Reasoning、ToolGroup、Viewport 和 ScrollToBottom：直接作为 React UI 基础。
+- `@assistant-ui/react-markdown`：流式 Markdown、`defer` 和 memo。
+- OMP TUI 与 `collab-web`：混合内容的原始顺序、`toolCallId` 配对和最小事件归并规则；优先复用当前 Runtime 版本对应的实现。
 - `@oh-my-pi/pi-wire`：只复用与当前 Runtime 版本一致并经 RPC fixture 验证的公开类型。
-- OpenCode Session UI：工具分组和状态摘要。
-- TanStack Virtual：长对话虚拟化。
-- Radix UI：Permission、菜单和折叠交互。
+- ohmypi-craft：参考纯函数事件处理、工具结果缺失和乱序时的容错，不复制其消息模型。
+- OpenCode Session UI：只参考 Context Tool 的分类、分组终止条件和状态摘要，其 SolidJS 组件不直接复制。
+- TanStack Virtual：仅在默认 `content-visibility` 经测试仍不满足性能预算时接入。
+- Radix UI：Interaction、菜单和折叠交互。
