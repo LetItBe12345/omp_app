@@ -1,5 +1,5 @@
-import { act, render, waitFor } from '@testing-library/react'
-import { useEffect, useState } from 'react'
+import { act, render } from '@testing-library/react'
+import { Profiler, useEffect, useState, type ComponentProps } from 'react'
 import { describe, expect, it } from 'vitest'
 import {
   ConversationRuntime,
@@ -14,12 +14,14 @@ import {
 
 function PerformanceHarness({
   initial,
-  onReady
+  onReady,
+  onRender
 }: {
   initial: ConversationProjection
   onReady: (
     setter: React.Dispatch<React.SetStateAction<ConversationProjection>>
   ) => void
+  onRender: ComponentProps<typeof Profiler>['onRender']
 }): React.JSX.Element {
   const [projection, setProjection] = useState(initial)
   useEffect(() => onReady(setProjection), [onReady])
@@ -32,7 +34,9 @@ function PerformanceHarness({
         projection={projection}
         setProjection={setProjection}
       >
-        <ThreadMessages />
+        <Profiler id="conversation" onRender={onRender}>
+          <ThreadMessages />
+        </Profiler>
       </ConversationRuntime>
     </div>
   )
@@ -102,13 +106,33 @@ describe('流式投影性能', () => {
     ): void => {
       updateProjection = setter
     }
+    let batchStartedAt: number | undefined
+    const commitLatencies: number[] = []
+    const renderDurations: number[] = []
+    const recordCommit: ComponentProps<typeof Profiler>['onRender'] = (
+      _id,
+      phase,
+      actualDuration,
+      _baseDuration,
+      _startTime,
+      commitTime
+    ): void => {
+      if (phase === 'mount' || batchStartedAt === undefined) return
+      commitLatencies.push(commitTime - batchStartedAt)
+      renderDurations.push(actualDuration)
+      batchStartedAt = undefined
+    }
     const { container } = render(
-      <PerformanceHarness initial={projection} onReady={setUpdater} />
+      <PerformanceHarness
+        initial={projection}
+        onReady={setUpdater}
+        onRender={recordCommit}
+      />
     )
-    const durations: number[] = []
+    const firstHistoryMessage = container.querySelector('.assistant-message')
 
     for (let second = 0; second < 60; second += 1) {
-      const startedAt = performance.now()
+      batchStartedAt = performance.now()
       await act(async () => {
         updateProjection?.((current) => {
           let next = current
@@ -130,21 +154,24 @@ describe('流式投影性能', () => {
           return next
         })
       })
-      await waitFor(
-        () => {
-          const assistantMessages =
-            container.querySelectorAll('.assistant-message')
-          expect(
-            assistantMessages.item(assistantMessages.length - 1)
-          ).toHaveTextContent(`可见流式输出 ${second * 100 + 99}`)
-        },
-        { interval: 5, timeout: 100 }
+      // React 提交时已经更新 DOM。文字断言只检查结果，不计入性能数据。
+      expect(container.querySelector('.process-content')).toHaveTextContent(
+        `可见流式输出 ${second * 100 + 99}`
       )
-      durations.push(performance.now() - startedAt)
     }
 
-    const sorted = durations.sort((left, right) => left - right)
-    const p95 = sorted[Math.floor(sorted.length * 0.95)] ?? Infinity
-    expect(p95).toBeLessThan(100)
+    const commitP95 = commitLatencies.sort((left, right) => left - right)[
+      Math.floor(commitLatencies.length * 0.95)
+    ]
+    const renderP95 = renderDurations.sort((left, right) => left - right)[
+      Math.floor(renderDurations.length * 0.95)
+    ]
+    expect(commitLatencies).toHaveLength(60)
+    expect(commitLatencies.every((duration) => duration >= 0)).toBe(true)
+    expect(commitP95).toBeLessThan(100)
+    expect(renderP95).toBeLessThan(100)
+    expect(container.querySelector('.assistant-message')).toBe(
+      firstHistoryMessage
+    )
   }, 20_000)
 })
