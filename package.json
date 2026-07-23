@@ -26,6 +26,8 @@
     "smoke": "node scripts/electron-smoke.mjs"
   },
   "dependencies": {
+    "@assistant-ui/react": "0.14.27",
+    "@assistant-ui/react-markdown": "0.14.6",
     "@radix-ui/react-dialog": "^1.1.20",
     "@radix-ui/react-popover": "^1.1.20",
     "cmdk": "^1.1.1",

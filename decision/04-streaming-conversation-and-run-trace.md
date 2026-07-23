@@ -1,6 +1,6 @@
 # 决策记录 04：流式对话与执行轨迹
 
-- 对应任务：`TODO/in-progress/04-streaming-conversation-and-run-trace.md`
+- 对应任务：`TODO/done/04-streaming-conversation-and-run-trace.md`
 - 状态：已确认
 - 确认日期：2026-07-23
 
