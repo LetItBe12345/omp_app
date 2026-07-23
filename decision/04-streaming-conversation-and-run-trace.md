@@ -54,3 +54,16 @@
 31. 从 `always-ask` 或 `write` 切换为 `yolo` 时显示一次风险确认；拒绝确认则保持原模式，不重启 Runtime。
 32. OMP 要求审批时，通过 RPC `extension_ui_request` 的 `select` 请求接收选项，并使用现有 `respondExtensionUi` 返回结果。只显示 OMP 实际提供的选项；v17.0.6 的通用工具审批为 `Approve` 和 `Deny`，Desktop 不自行增加“本次 Session 始终允许”等范围。
 33. MVP 的权限按钮只管理三种审批模式，不提供每个工具的 `allow`、`prompt`、`deny` 编辑器。单工具规则以后作为高级设置处理。
+
+## Run 展示投影
+
+34. Renderer 将一次 Agent Run 归一化为五类展示数据：`Narrative`、`Action`、`Interaction`、`Artifact` 和 `Lifecycle`。这是 Desktop 的展示投影，不是新的 RPC 协议，也不能反向承担 Agent 状态机职责。
+35. `Narrative` 分为 `reasoning`、`intermediate` 和 `final`。`final` 是成功结束后按本文件第 5–7 条规则得到的分类结果，不是 RPC 直接提供的新消息类型。
+36. Tool Call、运行状态、进度、结果和错误属于同一个 `Action` 生命周期，必须用 `toolCallId` 更新同一个对象，不能渲染成互不相关的多张卡片。
+37. `Action` 的展示类别为 `context`、`command`、`edit`、`subagent` 和 `external`。类别只用于摘要和分组；无法可靠识别时使用 `external`，不能丢弃原始工具名称和结果。
+38. 连续出现且中间没有 Narrative、Interaction 或其他 Action 的 Read、Grep、Glob、List 和 Web Search 等低价值上下文操作，聚合为一个 `context` Action。展开后仍按原始顺序显示每个工具操作。
+39. `Interaction` 表示等待用户参与的临时交互。等待期间在对应 Action 的原始位置展开；处理后移除交互控件并保留 Action 的最终状态和历史，不能删除整个 Action。
+40. `Lifecycle` 只驱动运行状态、Spinner、Stop、等待提示、完成时间和错误状态，不作为普通聊天消息或独立历史卡片。
+41. MVP-04 的 `Artifact` 只保留 RPC 已提供的高价值结果引用或摘要。聊天流不展开完整 Diff，也不在 Renderer 中额外聚合整个 Run 的最终 ChangeSet。
+42. Run 级 ChangeSet、多次编辑同一文件后的最终 Diff、非 Edit 工具造成的工作区变化和独立 Review 面板属于 POST-MVP-01。
+43. 成功结束后的常驻 UI 只突出最终回答和单行 Process 摘要；文件改动存在时可以显示简短摘要。Interaction 只在等待用户处理时临时展开。
