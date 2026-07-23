@@ -221,6 +221,18 @@ Main 只负责转发和生命周期管理。
 
 状态必须有明确归属。
 
+### 6.1 Run 展示投影
+
+Renderer 将 OMP 实时事件和 Session 历史转换为同一种有序展示投影：
+
+- `Narrative`：Reasoning、过程说明和最终回答。
+- `Action`：用 `toolCallId` 归并的一次完整工具生命周期。
+- `Interaction`：等待用户参与的临时交互。
+- `Artifact`：高价值工具结果的引用或摘要。
+- `Lifecycle`：运行状态和控制信号，不属于聊天内容。
+
+该投影必须保持薄层。它不持久化第二份 Session 历史，不调度工具，也不推断 OMP 未提供的 Agent 状态。Context Action 聚合只影响展示，展开时仍恢复原始操作顺序。
+
 ### Renderer 持有
 
 - 当前界面布局

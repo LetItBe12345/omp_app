@@ -52,12 +52,28 @@ Thinking、工具调用和最终文本属于同一个 Assistant Turn。
 
 ```ts
 type AssistantTurn = {
-  text: TextPart[]
-  reasoning: ReasoningPart[]
-  tools: ToolPart[]
+  items: TurnItem[]
+  finalItemIds: string[]
   status: 'running' | 'done' | 'error'
 }
+
+type TurnItem = NarrativeItem | ActionItem | InteractionItem | ArtifactItem
+
+type AgentRunProjection = {
+  turns: AssistantTurn[]
+  lifecycle: Lifecycle
+}
 ```
+
+`items` 保留 OMP 原始内容顺序。`finalItemIds` 只引用成功结束后被分类为最终回答的 Narrative，不复制完整文本。Lifecycle 属于 Run，不进入 `TurnItem` 或聊天内容。
+
+五类展示投影的职责：
+
+- `Narrative`：Reasoning、过程说明和最终回答。
+- `Action`：一次工具操作从调用、运行、进度到结果或错误的完整生命周期。
+- `Interaction`：等待审批、确认、选择或输入的临时交互。
+- `Artifact`：从工具结果提取的高价值产物引用或摘要。
+- `Lifecycle`：驱动 Run 状态和控制组件，不渲染成普通聊天消息。
 
 OMP RPC 已提供所需事件：
 
@@ -71,6 +87,8 @@ agent_start / agent_end
 ```
 
 Renderer 只做事件归并和展示，不重建 Agent 状态机。
+
+Tool Call、Progress 和 Result 使用 `toolCallId` 更新同一个 Action。连续的 Read、Grep、Glob、List 和 Web Search 等上下文操作可以聚合显示；聚合只影响展示，展开后必须恢复原始工具顺序。
 
 ## 4. Thinking 和工具调用的交互
 

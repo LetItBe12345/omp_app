@@ -31,12 +31,18 @@
 ### 数据模型
 
 - [ ] 定义统一的 `AssistantTurn` 和有序 `TurnItem` 数据结构，保留 assistant 消息边界与内容顺序。
+- [ ] 将 Run 展示投影归一化为 `Narrative`、`Action`、`Interaction`、`Artifact` 和 `Lifecycle` 五类；它们只负责展示，不替代 OMP RPC 或 Agent 状态机。
+- [ ] 将 Narrative 标记为 `reasoning`、`intermediate` 或 `final`；`final` 只能由成功结束后的终止规则得出。
 - [ ] 最终回答使用有序内容的引用或索引表示，不与执行轨迹重复保存完整文本。
 - [ ] 建立 `OmpEventReducer`，按原始顺序归并文本、Thinking、Tool Call 和 Tool Result。
 - [ ] `OmpEventReducer` 只做事件归并和字段转换，不实现 Agent 状态机、消息持久化、工具调度或重试。
 - [ ] 正确处理 `message_start/update/end`；把 `message_update` 视为累计快照并替换当前消息投影，禁止重复追加。
 - [ ] 正确处理 Thinking 增量。
 - [ ] 使用 `toolCallId` 归并 Tool Call 参数、进度、结果和错误。
+- [ ] 将 Action 分类为 `context`、`command`、`edit`、`subagent` 和 `external`，无法可靠识别时保留原始工具信息并回退到 `external`。
+- [ ] 连续的 Read、Grep、Glob、List 和 Web Search 等低价值工具聚合为一个 Context Action；遇到 Narrative、Interaction 或其他 Action 时结束当前聚合。
+- [ ] Interaction 与对应 Action 建立关联；处理后只收起交互控件，保留 Action 最终状态和历史。
+- [ ] Lifecycle 只驱动运行状态和控制组件，不生成普通聊天消息。
 - [ ] 正确处理 Agent、Turn、Retry、Compaction 和 Notice 状态。
 - [ ] 实现纯函数形式的最终回答分类规则，覆盖无工具消息和最后一个 Tool Call 后的结尾文本。
 - [ ] 只有成功的 `agent_end` 才执行最终分类；失败、中止、等待 Permission 或信息不足时保留完整轨迹。
@@ -64,9 +70,10 @@
 - [ ] 展开已完成轨迹后恢复全部过程内容的原始顺序，不把工具集中到独立区域。
 - [ ] 同一段最终文本只渲染一次，移动到最终回答区域后不在轨迹中保留副本。
 - [ ] Tool Call 默认只显示名称、状态和一行摘要，可以再次展开查看输入、完整输出和错误。
+- [ ] Context Action 默认显示文件数、搜索数和状态摘要；展开后恢复内部工具操作的原始顺序。
 - [ ] Permission 请求显示在对应 Tool Call 的原始位置，并滚动到该位置，不打开居中模态框。
 - [ ] Permission 只显示 OMP RPC 实际提供的选项；v17.0.6 通用工具审批使用 `Approve` 和 `Deny`，不自行增加授权范围。
-- [ ] 文件改动只显示简短摘要，不在对话流展开完整 Diff。
+- [ ] 文件改动只显示 RPC 原始结果能够可靠提供的简短摘要，不在 MVP 聚合 Run 级 ChangeSet，也不在对话流展开完整 Diff。
 - [ ] 自动滚动只在用户位于底部附近时生效。
 - [ ] 用户主动向上滚动后停止自动跟随，并显示“有新内容”；点击后回到底部并恢复自动跟随。
 - [ ] 已完成轨迹的手动展开状态不持久化；重新打开 Session 时，成功任务折叠，失败和等待 Permission 的任务展开。
@@ -101,6 +108,9 @@
 - [ ] 测试连续 `message_update` 累计快照不会造成文本重复。
 - [ ] 测试“过程文本 → 工具 → 最终文本”和单条混合 assistant 消息都保持原始顺序。
 - [ ] 测试多个 Tool Call 按 `toolCallId` 配对结果，且中间普通文本不会被移到错误位置。
+- [ ] 测试连续 Context Action 能够聚合；遇到普通文本、Permission、命令或编辑操作时正确切断分组。
+- [ ] 测试未知工具回退为 `external`，并保留工具名称、输入、结果和错误。
+- [ ] 测试 Interaction 处理后移除控件但不删除 Action，Lifecycle 不生成聊天卡片。
 - [ ] 测试无工具的正常结尾、最后一个工具后的结尾文本和无法判断最终回答三类分类结果。
 - [ ] 测试成功重分类后最终文本只出现一次，稳定 key 不因折叠产生重复节点。
 - [ ] 测试运行中展开、成功折叠、失败保持展开。
