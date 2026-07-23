@@ -131,6 +131,36 @@ describe('App shell', () => {
     finishStop?.({ ok: true, data: null })
   })
 
+  it('Prompt 请求返回前禁止重复提交同一输入', async () => {
+    vi.mocked(window.desktop.getRuntimeState).mockResolvedValue({
+      ok: true,
+      data: {
+        status: 'ready',
+        workspacePath: '/tmp/workspace',
+        sessionId: 'session-1',
+        isStreaming: false,
+        queuedMessageCount: 0
+      }
+    })
+    let finishPrompt:
+      ((value: { ok: true; data: undefined }) => void) | undefined
+    vi.mocked(window.desktop.prompt).mockReturnValue(
+      new Promise((resolve) => {
+        finishPrompt = resolve
+      })
+    )
+    render(<App />)
+    const composer = await screen.findByRole('textbox', { name: '任务输入' })
+    fireEvent.change(composer, { target: { value: '只发送一次' } })
+    const sendButton = screen.getByRole('button', { name: '发送' })
+
+    fireEvent.click(sendButton)
+    await waitFor(() => expect(sendButton).toBeDisabled())
+    fireEvent.click(sendButton)
+    expect(window.desktop.prompt).toHaveBeenCalledTimes(1)
+    finishPrompt?.({ ok: true, data: undefined })
+  })
+
   it('当前模型从可用目录消失时阻止发送并打开模型选择器', async () => {
     vi.mocked(window.desktop.getRuntimeState).mockResolvedValueOnce({
       ok: true,

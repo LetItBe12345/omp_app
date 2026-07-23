@@ -397,6 +397,125 @@ describe('registerRuntimeIpc', () => {
     )
     cleanup()
   })
+
+  it('事件批次达到数量、字节和单事件上限时立即发送', async () => {
+    vi.useFakeTimers()
+    try {
+      const { registerRuntimeIpc } = await import('../../src/main/runtime-ipc')
+      const harness = createHarness()
+      const cleanup = registerRuntimeIpc(
+        harness.supervisor as unknown as RuntimeSupervisor,
+        harness.getWindow
+      )
+
+      for (let index = 0; index < 100; index += 1) {
+        harness.emitter.emit('event', {
+          type: 'message_update',
+          index,
+          message: { role: 'assistant', content: [] }
+        })
+      }
+      expect(electron.send).toHaveBeenCalledWith(IPC_CHANNELS.event, {
+        type: 'omp-event-batch',
+        events: expect.arrayContaining([
+          expect.objectContaining({ type: 'message_update', index: 99 })
+        ])
+      })
+      expect(
+        vi.mocked(electron.send).mock.calls.find(
+          (call) =>
+            (
+              call[1] as {
+                type?: string
+                events?: unknown[]
+              }
+            )?.type === 'omp-event-batch'
+        )?.[1]
+      ).toMatchObject({ events: { length: 100 } })
+
+      electron.send.mockClear()
+      const chunk = 'x'.repeat(140 * 1024)
+      harness.emitter.emit('event', {
+        type: 'message_update',
+        message: { role: 'assistant', content: [{ type: 'text', text: chunk }] }
+      })
+      harness.emitter.emit('event', {
+        type: 'message_update',
+        message: { role: 'assistant', content: [{ type: 'text', text: chunk }] }
+      })
+      expect(electron.send).toHaveBeenCalledTimes(1)
+
+      electron.send.mockClear()
+      harness.emitter.emit('event', {
+        type: 'message_update',
+        payload: 'x'.repeat(260 * 1024)
+      })
+      expect(electron.send).toHaveBeenCalledTimes(2)
+      cleanup()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('Tool 进度每 100ms 最多刷新一次，覆盖旧进度且结束不会倒退', async () => {
+    vi.useFakeTimers()
+    try {
+      const { registerRuntimeIpc } = await import('../../src/main/runtime-ipc')
+      const harness = createHarness()
+      const cleanup = registerRuntimeIpc(
+        harness.supervisor as unknown as RuntimeSupervisor,
+        harness.getWindow
+      )
+
+      harness.emitter.emit('event', {
+        type: 'tool_execution_update',
+        toolCallId: 't1',
+        partialResult: 'first'
+      })
+      await vi.advanceTimersByTimeAsync(24)
+      harness.emitter.emit('event', {
+        type: 'tool_execution_update',
+        toolCallId: 't1',
+        partialResult: 'stale'
+      })
+      harness.emitter.emit('event', {
+        type: 'tool_execution_update',
+        toolCallId: 't1',
+        partialResult: 'latest'
+      })
+      await vi.advanceTimersByTimeAsync(100)
+
+      const progress = vi
+        .mocked(electron.send)
+        .mock.calls.flatMap((call) => {
+          const payload = call[1] as { events?: Array<Record<string, unknown>> }
+          return payload.events ?? []
+        })
+        .filter((event) => event['type'] === 'tool_execution_update')
+      expect(progress.map((event) => event['partialResult'])).toEqual([
+        'first',
+        'latest'
+      ])
+
+      harness.emitter.emit('event', {
+        type: 'tool_execution_update',
+        toolCallId: 't1',
+        partialResult: 'must-not-arrive'
+      })
+      harness.emitter.emit('event', {
+        type: 'tool_execution_end',
+        toolCallId: 't1',
+        result: 'done'
+      })
+      await vi.advanceTimersByTimeAsync(200)
+      const serialized = JSON.stringify(electron.send.mock.calls)
+      expect(serialized).not.toContain('must-not-arrive')
+      expect(serialized).toContain('tool_execution_end')
+      cleanup()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 type HarnessSupervisor = EventEmitter & {

@@ -8,6 +8,7 @@ import {
   Search,
   Settings2
 } from 'lucide-react'
+import { ComposerPrimitive } from '@assistant-ui/react'
 import {
   useCallback,
   useEffect,
@@ -24,6 +25,14 @@ import type {
   RuntimeSnapshot
 } from '../shared/desktop-api'
 import { ModelControls } from './model-controls'
+import { ConversationRuntime, ThreadMessages } from './conversation-thread'
+import {
+  appendUserTurn,
+  createConversationProjection,
+  projectHistory,
+  reduceOmpEvent,
+  type ConversationProjection
+} from './omp-event-reducer'
 import { strings } from './strings'
 
 const fixture = __OMP_UI_FIXTURE__ ? uiFixture : null
@@ -40,6 +49,7 @@ const knownOmpEventTypes = new Set([
   'tool_execution_end',
   'prompt_result',
   'extension_ui_request',
+  'extension_ui_resolved',
   'available_commands_update',
   'auto_compaction_start',
   'auto_compaction_end',
@@ -215,6 +225,8 @@ function hasTextSelection(): boolean {
 function Conversation({
   runtime,
   onSnapshot,
+  projection,
+  setProjection,
   input,
   onInput,
   models,
@@ -227,6 +239,8 @@ function Conversation({
 }: {
   runtime: RuntimeSnapshot
   onSnapshot: (snapshot: RuntimeSnapshot) => void
+  projection: ConversationProjection
+  setProjection: React.Dispatch<React.SetStateAction<ConversationProjection>>
   input: string
   onInput: (value: string) => void
   models: AvailableModel[]
@@ -238,6 +252,7 @@ function Conversation({
   onRefreshProviders: () => Promise<boolean>
 }): React.JSX.Element {
   const [stopping, setStopping] = useState(false)
+  const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const busy = runtime.isStreaming || runtime.queuedMessageCount > 0
   const currentModelAvailable =
@@ -290,19 +305,23 @@ function Conversation({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
-  const send = async (): Promise<void> => {
-    const message = input.trim()
-    if (!ready || !message || stopping) return
+  const send = async (value = input): Promise<void> => {
+    const message = value.trim()
+    if (!ready || !message || stopping || sending) return
     if (busy && message.startsWith('/')) {
       setError('任务结束后可执行 Slash Command')
       return
     }
     setError(null)
+    setSending(true)
     const result = busy
       ? await window.desktop.followUp({ message })
       : await window.desktop.prompt({ message })
-    if (result.ok) onInput('')
-    else setError(result.error.message)
+    if (result.ok) {
+      setProjection((current) => appendUserTurn(current, message))
+      onInput('')
+    } else setError(result.error.message)
+    setSending(false)
   }
 
   const restart = async (): Promise<void> => {
@@ -312,7 +331,7 @@ function Conversation({
     else setError(result.error.message)
   }
 
-  return (
+  const conversation = (
     <main
       className="flex h-full min-w-0 flex-col bg-[var(--surface-main)]"
       data-slot="conversation-main"
@@ -330,12 +349,10 @@ function Conversation({
         </div>
       </header>
 
-      <div
-        className={`min-h-0 flex-1 overflow-y-auto p-8 ${fixture ? '' : 'grid place-items-center'}`}
-      >
+      <div className="min-h-0 flex-1">
         {fixture ? (
           <div
-            className="mx-auto flex max-w-4xl flex-col gap-7 pt-8"
+            className="mx-auto flex h-full max-w-4xl flex-col gap-7 overflow-y-auto p-8 pt-16"
             data-slot="fixture-messages"
           >
             <div className="ml-auto max-w-[72%] rounded-2xl bg-[var(--surface-selected)] px-4 py-3 text-sm leading-6">
@@ -345,20 +362,24 @@ function Conversation({
               {fixture.assistantMessage}
             </div>
           </div>
+        ) : projection.turns.length > 0 ? (
+          <ThreadMessages />
         ) : (
           <section
-            className="max-w-md text-center"
+            className="grid h-full place-items-center p-8 text-center"
             data-slot="conversation-empty-state"
           >
-            <div className="mx-auto grid size-11 place-items-center rounded-2xl border border-[var(--border)] bg-white shadow-xs">
-              <MessageSquare size={20} strokeWidth={1.6} />
+            <div className="max-w-md">
+              <div className="mx-auto grid size-11 place-items-center rounded-2xl border border-[var(--border)] bg-white shadow-xs">
+                <MessageSquare size={20} strokeWidth={1.6} />
+              </div>
+              <h3 className="mt-4 text-base font-semibold">
+                {strings.noConversation}
+              </h3>
+              <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">
+                {strings.noConversationHint}
+              </p>
             </div>
-            <h3 className="mt-4 text-base font-semibold">
-              {strings.noConversation}
-            </h3>
-            <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">
-              {strings.noConversationHint}
-            </p>
           </section>
         )}
       </div>
@@ -376,24 +397,46 @@ function Conversation({
             providers={providers}
             runtime={runtime}
           />
-          <textarea
-            aria-label="任务输入"
-            className="h-20 w-full resize-none bg-transparent px-2 py-1 text-sm outline-none placeholder:text-[var(--text-muted)] disabled:cursor-not-allowed"
-            placeholder={strings.composerPlaceholder}
-            value={input}
-            onChange={(event) => onInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (
-                event.key === 'Enter' &&
-                !event.shiftKey &&
-                !event.nativeEvent.isComposing
-              ) {
-                event.preventDefault()
-                void send()
-              }
-            }}
-            disabled={!ready || stopping}
-          />
+          {fixture ? (
+            <textarea
+              aria-label="任务输入"
+              className="h-20 w-full resize-none bg-transparent px-2 py-1 text-sm outline-none placeholder:text-[var(--text-muted)] disabled:cursor-not-allowed"
+              disabled={!ready || stopping || sending}
+              onChange={(event) => onInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (
+                  event.key === 'Enter' &&
+                  !event.shiftKey &&
+                  !event.nativeEvent.isComposing
+                ) {
+                  event.preventDefault()
+                  void send()
+                }
+              }}
+              placeholder={strings.composerPlaceholder}
+              value={input}
+            />
+          ) : (
+            <ComposerPrimitive.Input
+              aria-label="任务输入"
+              className="h-20 w-full resize-none bg-transparent px-2 py-1 text-sm outline-none placeholder:text-[var(--text-muted)] disabled:cursor-not-allowed"
+              disabled={!ready || stopping || sending}
+              onChange={(event) => onInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (
+                  event.key === 'Enter' &&
+                  !event.shiftKey &&
+                  !event.nativeEvent.isComposing
+                ) {
+                  event.preventDefault()
+                  void send()
+                }
+              }}
+              placeholder={strings.composerPlaceholder}
+              submitMode="none"
+              value={input}
+            />
+          )}
           <div className="flex items-center justify-between px-1">
             <span className="text-[11px] text-[var(--text-muted)]">
               {error ??
@@ -444,6 +487,7 @@ function Conversation({
               type="button"
               disabled={
                 stopping ||
+                sending ||
                 (runtime.status !== 'failed' &&
                   (!ready || (!busy && input.trim().length === 0)))
               }
@@ -461,6 +505,20 @@ function Conversation({
       </div>
     </main>
   )
+  if (fixture) return conversation
+  return (
+    <ConversationRuntime
+      isRunning={busy}
+      onCancel={stop}
+      onSend={async (message) => {
+        if (message.trim()) await send(message)
+      }}
+      projection={projection}
+      setProjection={setProjection}
+    >
+      {conversation}
+    </ConversationRuntime>
+  )
 }
 
 export function App(): React.JSX.Element {
@@ -477,7 +535,9 @@ export function App(): React.JSX.Element {
   const [loginState, setLoginState] = useState<ProviderLoginState>({
     status: 'idle'
   })
+  const [projection, setProjection] = useState(createConversationProjection)
   const draftKey = useRef<string | null>(null)
+  const projectionSessionId = useRef<string | undefined>(undefined)
 
   const updateComposer = useCallback((value: string): void => {
     setComposerInput(value)
@@ -487,6 +547,10 @@ export function App(): React.JSX.Element {
   }, [])
 
   const applySnapshot = useCallback((snapshot: RuntimeSnapshot): void => {
+    if (snapshot.sessionId !== projectionSessionId.current) {
+      projectionSessionId.current = snapshot.sessionId
+      setProjection(createConversationProjection())
+    }
     const nextDraftKey =
       snapshot.workspacePath && snapshot.sessionId
         ? `omp-draft:${snapshot.workspacePath}:${snapshot.sessionId}`
@@ -528,7 +592,6 @@ export function App(): React.JSX.Element {
       if (result.ok) {
         applySnapshot(result.data)
         if (result.data.status === 'ready') {
-          void window.desktop.getMessages()
           void refreshModels()
           void refreshProviders()
           void window.desktop.getProviderLoginState().then((loginResult) => {
@@ -570,7 +633,9 @@ export function App(): React.JSX.Element {
             level: 'debug',
             message: `忽略未知 OMP 事件：${ompEvent.type}`
           })
+          return
         }
+        setProjection((current) => reduceOmpEvent(current, ompEvent))
       }
       if (event.type === 'omp-event') handleOmpEvent(event.event)
       if (event.type === 'omp-event-batch') {
@@ -578,6 +643,17 @@ export function App(): React.JSX.Element {
       }
     })
   }, [applySnapshot, refreshModels, refreshProviders, updateComposer])
+
+  useEffect(() => {
+    if (runtime.status !== 'ready' || !runtime.sessionId) return
+    let cancelled = false
+    void window.desktop.getMessages().then((result) => {
+      if (!cancelled && result.ok) setProjection(projectHistory(result.data))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [runtime.sessionId, runtime.status])
 
   const openWorkspace = async (): Promise<void> => {
     const result = await window.desktop.chooseWorkspace()
@@ -605,6 +681,8 @@ export function App(): React.JSX.Element {
           <Conversation
             runtime={runtime}
             onSnapshot={applySnapshot}
+            projection={projection}
+            setProjection={setProjection}
             input={composerInput}
             onInput={updateComposer}
             models={models}

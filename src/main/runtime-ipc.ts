@@ -192,7 +192,13 @@ export function registerRuntimeIpc(
     { event: OmpEvent; timer?: NodeJS.Timeout }
   >()
   let eventBatch: OmpEvent[] = []
+  let eventBatchBytes = 0
   let eventBatchTimer: NodeJS.Timeout | null = null
+  const pendingToolProgress = new Map<
+    string,
+    { event: OmpEvent; timer: NodeJS.Timeout }
+  >()
+  const lastToolProgressAt = new Map<string, number>()
   let providerLoginState: ProviderLoginState = { status: 'idle' }
   let activeLoginTask: Promise<void> | null = null
   let activeLoginProviderId: string | null = null
@@ -247,7 +253,61 @@ export function registerRuntimeIpc(
     if (eventBatch.length === 0) return
     const events = eventBatch
     eventBatch = []
+    eventBatchBytes = 0
     send({ type: 'omp-event-batch', events })
+  }
+
+  const queueBatchEvent = (event: OmpEvent): void => {
+    const bytes = Buffer.byteLength(JSON.stringify(event), 'utf8')
+    if (bytes > 256 * 1024) {
+      flushEventBatch()
+      send({ type: 'omp-event-batch', events: [event] })
+      return
+    }
+    if (eventBatch.length >= 100 || eventBatchBytes + bytes > 256 * 1024) {
+      flushEventBatch()
+    }
+    eventBatch.push(event)
+    eventBatchBytes += bytes
+    if (eventBatch.length >= 100 || eventBatchBytes >= 256 * 1024) {
+      flushEventBatch()
+      return
+    }
+    eventBatchTimer ??= setTimeout(flushEventBatch, 24)
+  }
+
+  const clearToolProgress = (toolCallId: string): void => {
+    const pending = pendingToolProgress.get(toolCallId)
+    if (pending) clearTimeout(pending.timer)
+    pendingToolProgress.delete(toolCallId)
+    lastToolProgressAt.delete(toolCallId)
+  }
+
+  const queueToolProgress = (event: OmpEvent): void => {
+    const toolCallId = event['toolCallId']
+    if (typeof toolCallId !== 'string') {
+      queueBatchEvent(event)
+      return
+    }
+    const existing = pendingToolProgress.get(toolCallId)
+    if (existing) {
+      existing.event = event
+      return
+    }
+    const elapsed = Date.now() - (lastToolProgressAt.get(toolCallId) ?? 0)
+    if (elapsed >= 100) {
+      lastToolProgressAt.set(toolCallId, Date.now())
+      queueBatchEvent(event)
+      return
+    }
+    const timer = setTimeout(() => {
+      const pending = pendingToolProgress.get(toolCallId)
+      if (!pending) return
+      pendingToolProgress.delete(toolCallId)
+      lastToolProgressAt.set(toolCallId, Date.now())
+      queueBatchEvent(pending.event)
+    }, 100 - elapsed)
+    pendingToolProgress.set(toolCallId, { event, timer })
   }
 
   const deletePendingExtensionUi = (id: string): void => {
@@ -357,6 +417,14 @@ export function registerRuntimeIpc(
                   // Runtime 已退出时只清理本地状态。
                 }
                 deletePendingExtensionUi(requestId)
+                send({
+                  type: 'omp-event',
+                  event: {
+                    type: 'extension_ui_resolved',
+                    id: requestId,
+                    timedOut: true
+                  }
+                })
                 if (activeLoginTask) {
                   loginInputTimedOut = true
                   setProviderLoginState({
@@ -396,13 +464,16 @@ export function registerRuntimeIpc(
       }
     }
 
-    if (
-      event.type === 'message_update' ||
-      event.type === 'thinking_delta' ||
-      event.type === 'tool_execution_update'
-    ) {
-      eventBatch.push(event)
-      eventBatchTimer ??= setTimeout(flushEventBatch, 24)
+    if (event.type === 'tool_execution_update') {
+      queueToolProgress(event)
+      return
+    }
+    if (event.type === 'tool_execution_end') {
+      const toolCallId = event['toolCallId']
+      if (typeof toolCallId === 'string') clearToolProgress(toolCallId)
+    }
+    if (event.type === 'message_update' || event.type === 'thinking_delta') {
+      queueBatchEvent(event)
       return
     }
     flushEventBatch()
@@ -819,6 +890,10 @@ export function registerRuntimeIpc(
         }
         supervisor.sendFrame({ type: 'extension_ui_response', id, ...response })
         deletePendingExtensionUi(id)
+        send({
+          type: 'omp-event',
+          event: { type: 'extension_ui_resolved', id }
+        })
         if (activeLoginTask) {
           setProviderLoginState({
             status: 'progress',
@@ -879,6 +954,9 @@ export function registerRuntimeIpc(
     supervisor.off('event', onOmpEvent)
     supervisor.off('before-stop', cancelPendingExtensionUi)
     clearPendingExtensionUi()
+    for (const toolCallId of pendingToolProgress.keys()) {
+      clearToolProgress(toolCallId)
+    }
     ipcMain.off(IPC_CHANNELS.rendererReady, replayPending)
     for (const channel of channels) ipcMain.removeHandler(channel)
   }

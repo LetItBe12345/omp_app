@@ -17,6 +17,7 @@ Object.defineProperty(globalThis, '__OMP_UI_FIXTURE__', {
 
 if (typeof window !== 'undefined') {
   Element.prototype.scrollIntoView = vi.fn()
+  HTMLElement.prototype.scrollTo = vi.fn()
   Object.defineProperty(window, 'desktop', {
     configurable: true,
     value: {

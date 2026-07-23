@@ -2,7 +2,7 @@
 
 - 状态：进行中
 - 阶段：Ubuntu MVP
-- 更新时间：2026-07-23
+- 更新时间：2026-07-24
 - 目标：把现有产品、架构和 RPC 文档转成可执行任务
 
 ## 已确定的实现边界
@@ -21,7 +21,7 @@
 - [x] [MVP-01：Electron 工程骨架](../done/01-electron-project-scaffold.md)
 - [x] [MVP-02：OMP RPC 与 IPC 主链路](../done/02-omp-rpc-runtime-and-ipc.md)
 - [x] [MVP-03：模型授权、Provider 与模型选择](../done/03-model-authorization-provider-and-selection.md)
-- [ ] [MVP-04：流式对话与执行轨迹](./04-streaming-conversation-and-run-trace.md)
+- [x] [MVP-04：流式对话与执行轨迹](../done/04-streaming-conversation-and-run-trace.md)
 - [ ] [MVP-05：Workspace、Session 与上下文引用](./05-workspace-session-and-context.md)
 - [ ] [MVP-06：Session 权限与工具审批](./06-session-permissions-and-tool-approvals.md)
 - [ ] [MVP-07：文件树与上下文引用](./07-files-preview-and-edit.md)
@@ -46,9 +46,9 @@ MVP-01 → MVP-02 → MVP-03 → MVP-04 → MVP-05
 - [ ] 应用可以在 Ubuntu 启动和退出。
 - [ ] 可以选择 Workspace，并以该目录启动 OMP RPC。
 - [ ] 首次使用时可以登录 Provider、获取可用模型并选择模型与 Thinking Level。
-- [ ] 可以发送 Prompt，查看流式文本、Thinking 和 Tool Call。
-- [ ] 回复完成后，执行过程自动折叠，最终回答保持突出。
-- [ ] 可以停止当前执行链，并按顺序处理 Follow-up。
+- [x] 可以发送 Prompt，查看流式文本、Thinking 和 Tool Call。
+- [x] 回复完成后，执行过程自动折叠，最终回答保持突出。
+- [x] 可以停止当前执行链，并按顺序处理 Follow-up。
 - [ ] 可以创建、切换和恢复 Session。
 - [ ] 每个 Session 可以保存“严格”“标准”或“全部允许”，并完成工具审批。
 - [ ] 可以浏览和搜索文件，并将文件或目录加入上下文。
