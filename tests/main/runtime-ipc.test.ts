@@ -403,6 +403,84 @@ describe('registerRuntimeIpc', () => {
     cleanup()
   })
 
+  it('选择目录后不等待 Runtime ready，100ms 内返回 Workspace', async () => {
+    const { registerRuntimeIpc } = await import('../../src/main/runtime-ipc')
+    const harness = createHarness()
+    const workspace = {
+      id: 'workspace-new',
+      path: '/tmp/new-workspace',
+      addedAt: '2026-07-24T00:00:00.000Z',
+      lastUsedAt: '2026-07-24T00:00:00.000Z',
+      pinned: false
+    }
+    const stateStore = {
+      state: {
+        version: 1,
+        activeWorkspaceId: workspace.id,
+        workspaces: [workspace],
+        sessionPreferences: {},
+        ui: {}
+      },
+      addWorkspace: vi.fn().mockResolvedValue(workspace),
+      overview: vi.fn().mockReturnValue({
+        activeWorkspaceId: workspace.id,
+        workspaces: [
+          {
+            ...workspace,
+            name: 'new-workspace',
+            available: true
+          }
+        ],
+        hasMore: false
+      })
+    } as unknown as DesktopStateStore
+    harness.supervisor.snapshot = {
+      status: 'ready',
+      workspacePath: '/tmp/old-workspace',
+      isStreaming: false,
+      queuedMessageCount: 0
+    }
+    harness.supervisor.start = vi.fn(() => new Promise(() => undefined))
+    electron.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: [workspace.path]
+    })
+    const cleanup = registerRuntimeIpc(
+      harness.supervisor as unknown as RuntimeSupervisor,
+      stateStore,
+      harness.getWindow
+    )
+
+    const result = await Promise.race([
+      electron.handlers.get(IPC_CHANNELS.chooseWorkspace)?.(harness.event),
+      new Promise<'timeout'>((resolve) =>
+        setTimeout(() => resolve('timeout'), 100)
+      )
+    ])
+
+    expect(result).not.toBe('timeout')
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        workspace: {
+          id: workspace.id,
+          path: workspace.path,
+          available: true
+        },
+        snapshot: {
+          status: 'starting',
+          workspacePath: workspace.path
+        }
+      }
+    })
+    expect(harness.supervisor.start).toHaveBeenCalledWith(workspace.path)
+    expect(electron.showOpenDialog).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ defaultPath: '/tmp' })
+    )
+    cleanup()
+  })
+
   it('事件批次达到数量、字节和单事件上限时立即发送', async () => {
     vi.useFakeTimers()
     try {
@@ -535,6 +613,7 @@ type HarnessSupervisor = EventEmitter & {
   switchSession: ReturnType<typeof vi.fn>
   snapshot: {
     status: string
+    workspacePath?: string
     isStreaming: boolean
     queuedMessageCount: number
   }

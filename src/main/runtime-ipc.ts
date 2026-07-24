@@ -6,7 +6,8 @@ import {
   type IpcMainInvokeEvent
 } from 'electron'
 import { stat } from 'node:fs/promises'
-import { isAbsolute, relative, sep } from 'node:path'
+import { performance } from 'node:perf_hooks'
+import { dirname, isAbsolute, relative, sep } from 'node:path'
 import type {
   DesktopResult,
   ExtensionUiResponse,
@@ -14,8 +15,11 @@ import type {
   OmpEvent,
   PromptInput,
   RuntimeEvent,
+  RuntimeError,
   RuntimeSnapshot,
-  ProviderLoginState
+  ProviderLoginState,
+  WorkspaceActivation,
+  WorkspaceSummary
 } from '../shared/desktop-api'
 import { IPC_CHANNELS } from '../shared/desktop-api'
 import type { DesktopStateStore } from './desktop-state'
@@ -38,16 +42,18 @@ function success<T>(data: T): DesktopResult<T> {
   return { ok: true, data }
 }
 
+function runtimeError(error: unknown): RuntimeError {
+  return error instanceof RuntimeFailure
+    ? error.toJSON()
+    : {
+        code: 'CRASHED' as const,
+        message: error instanceof Error ? error.message : String(error),
+        retryable: true
+      }
+}
+
 function failure<T>(error: unknown): DesktopResult<T> {
-  const runtimeError =
-    error instanceof RuntimeFailure
-      ? error.toJSON()
-      : {
-          code: 'CRASHED' as const,
-          message: error instanceof Error ? error.message : String(error),
-          retryable: true
-        }
-  return { ok: false, error: runtimeError }
+  return { ok: false, error: runtimeError(error) }
 }
 
 function isTrustedSender(
@@ -242,6 +248,7 @@ export function registerRuntimeIpc(
   let hostUriRegistered = false
   let hostUriRegistration: Promise<void> | null = null
   let contextSearch: AbortController | null = null
+  let activatingWorkspacePath: string | null = null
   const channels = [
     IPC_CHANNELS.chooseWorkspace,
     IPC_CHANNELS.getWorkspaces,
@@ -289,6 +296,11 @@ export function registerRuntimeIpc(
   }
 
   const onSnapshot = (snapshot: RuntimeSnapshot): void => {
+    if (
+      activatingWorkspacePath &&
+      snapshot.workspacePath !== activatingWorkspacePath
+    )
+      return
     if (snapshot.status === 'failed' || snapshot.status === 'stopped') {
       clearPendingExtensionUi()
       hostUriRegistered = false
@@ -316,6 +328,13 @@ export function registerRuntimeIpc(
   }
 
   const assertSwitchAllowed = (): void => {
+    if (activatingWorkspacePath) {
+      throw new RuntimeFailure(
+        'RUNTIME_NOT_READY',
+        'Workspace 正在启动，请稍候',
+        true
+      )
+    }
     if (
       supervisor.snapshot.isStreaming ||
       supervisor.snapshot.queuedMessageCount > 0 ||
@@ -443,6 +462,93 @@ export function registerRuntimeIpc(
         false
       )
     return { workspace, session }
+  }
+
+  const workspaceSummary = (
+    workspaceId: string,
+    available = true
+  ): WorkspaceSummary => {
+    const overview = stateStore.overview(new Map([[workspaceId, available]]), 0)
+    const workspace = overview.workspaces.find(
+      (item) => item.id === workspaceId
+    )
+    if (!workspace)
+      throw new RuntimeFailure(
+        'WORKSPACE_UNAVAILABLE',
+        'Workspace 不存在',
+        false
+      )
+    return workspace
+  }
+
+  const activateWorkspaceRuntime = (
+    workspace: ReturnType<typeof requireWorkspace>,
+    startedAt = performance.now()
+  ): RuntimeSnapshot => {
+    const startingSnapshot: RuntimeSnapshot = {
+      status: 'starting',
+      workspacePath: workspace.path,
+      isStreaming: false,
+      isAuthenticating: false,
+      queuedMessageCount: 0
+    }
+    activatingWorkspacePath = workspace.path
+    send({ type: 'snapshot', snapshot: startingSnapshot })
+
+    void (async () => {
+      try {
+        try {
+          if (
+            supervisor.snapshot.status === 'ready' &&
+            supervisor.snapshot.workspacePath === workspace.path
+          )
+            await supervisor.getState()
+          else await supervisor.start(workspace.path)
+          log.info('performance', {
+            event: 'workspace_activation_to_runtime_ready',
+            elapsedMs: Math.round(performance.now() - startedAt)
+          })
+        } catch (error) {
+          log.warn('Workspace Runtime 启动失败', error)
+          if (
+            supervisor.snapshot.workspacePath !== workspace.path ||
+            supervisor.snapshot.status !== 'failed'
+          ) {
+            send({
+              type: 'snapshot',
+              snapshot: {
+                ...startingSnapshot,
+                status: 'failed',
+                error: runtimeError(error)
+              }
+            })
+          }
+          return
+        }
+
+        if (workspace.activeSessionId) {
+          try {
+            const { session } = await requireSession(
+              workspace.id,
+              workspace.activeSessionId
+            )
+            supervisor.trustSession(session.id, session.path)
+            await supervisor.switchSession(session.id)
+          } catch (error) {
+            log.warn('恢复 Workspace 的活动 Session 失败', error)
+            send({
+              type: 'workspace-activation-failed',
+              error: runtimeError(error)
+            })
+          }
+        }
+      } finally {
+        if (activatingWorkspacePath === workspace.path)
+          activatingWorkspacePath = null
+      }
+    })()
+
+    return startingSnapshot
   }
 
   const respondHostUri = async (event: OmpEvent): Promise<void> => {
@@ -728,20 +834,33 @@ export function registerRuntimeIpc(
       assertTrustedSender(event, getWindow, developmentUrl)
       const window = getWindow()
       if (!window) return success(null)
+      const currentWorkspacePath = supervisor.snapshot.workspacePath
       const result = await dialog.showOpenDialog(window, {
+        ...(currentWorkspacePath
+          ? { defaultPath: dirname(currentWorkspacePath) }
+          : {}),
         properties: ['openDirectory', 'createDirectory']
       })
       const workspacePath = result.filePaths[0]
       if (result.canceled || !workspacePath) return success(null)
+      const selectedAt = performance.now()
       if (workspacePath !== supervisor.snapshot.workspacePath)
         assertSwitchAllowed()
       const workspace = await stateStore.addWorkspace(workspacePath)
-      const snapshot =
+      const snapshot: RuntimeSnapshot =
         supervisor.snapshot.status === 'ready' &&
         supervisor.snapshot.workspacePath === workspace.path
-          ? await supervisor.getState()
-          : await supervisor.start(workspace.path)
-      return success(snapshot)
+          ? supervisor.snapshot
+          : activateWorkspaceRuntime(workspace, selectedAt)
+      const activation: WorkspaceActivation = {
+        workspace: workspaceSummary(workspace.id),
+        snapshot
+      }
+      log.info('performance', {
+        event: 'workspace_selected_to_ipc_response',
+        elapsedMs: Math.round(performance.now() - selectedAt)
+      })
+      return success(activation)
     } catch (error) {
       return failure(error)
     }
@@ -784,16 +903,8 @@ export function registerRuntimeIpc(
         const snapshot =
           supervisor.snapshot.status === 'ready' &&
           supervisor.snapshot.workspacePath === workspace.path
-            ? await supervisor.getState()
-            : await supervisor.start(workspace.path)
-        if (workspace.activeSessionId) {
-          const { session } = await requireSession(
-            workspace.id,
-            workspace.activeSessionId
-          )
-          supervisor.trustSession(session.id, session.path)
-          return success(await supervisor.switchSession(session.id))
-        }
+            ? supervisor.snapshot
+            : activateWorkspaceRuntime(workspace)
         return success(snapshot)
       } catch (error) {
         return failure(error)

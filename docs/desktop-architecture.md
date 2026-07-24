@@ -17,6 +17,20 @@ OMP Desktop 是 Oh My Pi 的桌面宿主。
 - 界面简单
 - 最大限度复用 OMP Runtime、RPC 和已有 Web 组件
 
+### Workspace 打开性能
+
+Workspace 打开分为三个独立阶段：
+
+1. 点击后显示等待状态。
+2. 系统目录选择器返回后，持久化并显示 Workspace。
+3. 后台停止旧 Runtime，并用目标 Workspace 的 `--cwd` 启动新 Runtime。
+
+第 2 阶段不能等待第 3 阶段完成。CI 使用受控的文件选择器和 Runtime
+替身检查这条约束，并要求点击后的等待状态立即渲染。系统目录选择器受
+portal、桌面环境和用户操作影响，不把打开到关闭的总时间作为共享 CI 的
+硬阈值。Main 日志分别记录选择目录到 IPC 返回、选择目录到 Runtime ready
+的耗时，用于本机和发布版本比较。
+
 不在 Desktop 中重新实现 Agent Loop、模型调用、工具系统和会话系统。
 
 ## 2. 技术选择
