@@ -32,6 +32,73 @@ describe('App shell', () => {
     expect(screen.getByText('请先打开 Workspace')).toBeInTheDocument()
   })
 
+  it('打开系统目录选择器期间立即显示等待状态', async () => {
+    let finishSelection: ((value: { ok: true; data: null }) => void) | undefined
+    vi.mocked(window.desktop.chooseWorkspace).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishSelection = resolve
+      })
+    )
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: '打开 Workspace' }))
+
+    expect(
+      screen.getByRole('button', { name: '正在打开目录选择器' })
+    ).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('正在打开目录选择器…')
+
+    finishSelection?.({ ok: true, data: null })
+    await screen.findByRole('button', { name: '打开 Workspace' })
+  })
+
+  it('Runtime 启动完成前先显示新 Workspace', async () => {
+    vi.mocked(window.desktop.getWorkspaces).mockResolvedValue({
+      ok: true,
+      data: {
+        activeWorkspaceId: 'workspace-new',
+        workspaces: [
+          {
+            id: 'workspace-new',
+            path: '/tmp/new-workspace',
+            name: 'new-workspace',
+            available: true,
+            pinned: false,
+            addedAt: '2026-07-24T00:00:00.000Z',
+            lastUsedAt: '2026-07-24T00:00:00.000Z'
+          }
+        ],
+        hasMore: false
+      }
+    })
+    vi.mocked(window.desktop.chooseWorkspace).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        workspace: {
+          id: 'workspace-new',
+          path: '/tmp/new-workspace',
+          name: 'new-workspace',
+          available: true,
+          pinned: false,
+          addedAt: '2026-07-24T00:00:00.000Z',
+          lastUsedAt: '2026-07-24T00:00:00.000Z'
+        },
+        snapshot: {
+          status: 'starting',
+          workspacePath: '/tmp/new-workspace',
+          isStreaming: false,
+          queuedMessageCount: 0
+        }
+      }
+    })
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: '打开 Workspace' }))
+
+    expect(await screen.findByText('new-workspace')).toBeInTheDocument()
+    expect(window.desktop.getRuntimeState).toHaveBeenCalledTimes(1)
+  })
+
   it('运行中使用 Stop 按钮和 Ctrl+C 停止同一任务', async () => {
     vi.mocked(window.desktop.getRuntimeState).mockResolvedValueOnce({
       ok: true,

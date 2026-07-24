@@ -638,6 +638,7 @@ export function App(): React.JSX.Element {
   const [archivedExpanded, setArchivedExpanded] = useState(false)
   const [draftStatus, setDraftStatus] = useState<string | null>(null)
   const [openingSession, setOpeningSession] = useState(false)
+  const [openingWorkspace, setOpeningWorkspace] = useState(false)
   const projectionSessionId = useRef<string | undefined>(undefined)
   const projectionRef = useRef(projection)
   const projectionCache = useRef(new Map<string, ConversationProjection>())
@@ -750,6 +751,8 @@ export function App(): React.JSX.Element {
     })
     const unsubscribe = window.desktop.onRuntimeEvent((event) => {
       if (event.type === 'snapshot') applySnapshot(event.snapshot)
+      if (event.type === 'workspace-activation-failed')
+        setSessionError(event.error.message)
       if (event.type === 'provider-login') setLoginState(event.state)
       const handleOmpEvent = (ompEvent: {
         type: string
@@ -893,12 +896,27 @@ export function App(): React.JSX.Element {
   }, [currentProjectionKey, runtime.sessionId, runtime.status])
 
   const openWorkspace = async (): Promise<void> => {
-    const result = await window.desktop.chooseWorkspace()
-    if (result.ok && result.data) {
-      setTemporarySession(false)
-      applySnapshot(result.data)
-      await refreshWorkspaces()
-    } else if (!result.ok) setSessionError(result.error.message)
+    if (openingWorkspace) return
+    setOpeningWorkspace(true)
+    try {
+      const result = await window.desktop.chooseWorkspace()
+      if (result.ok && result.data) {
+        const { workspace, snapshot } = result.data
+        setTemporarySession(false)
+        setOverview((current) => ({
+          ...current,
+          activeWorkspaceId: workspace.id,
+          workspaces: [
+            workspace,
+            ...current.workspaces.filter((item) => item.id !== workspace.id)
+          ]
+        }))
+        applySnapshot(snapshot)
+        void refreshWorkspaces()
+      } else if (!result.ok) setSessionError(result.error.message)
+    } finally {
+      setOpeningWorkspace(false)
+    }
   }
 
   const activateWorkspace = async (workspaceId: string): Promise<void> => {
@@ -913,7 +931,8 @@ export function App(): React.JSX.Element {
     setRecentReferences([])
     setAttachments([])
     applySnapshot(result.data)
-    await refreshWorkspaces()
+    setOverview((current) => ({ ...current, activeWorkspaceId: workspaceId }))
+    void refreshWorkspaces()
   }
 
   const switchSession = async (sessionId: string): Promise<void> => {
@@ -1090,6 +1109,7 @@ export function App(): React.JSX.Element {
             runtime={runtime}
             overview={overview}
             onOpenWorkspace={() => void openWorkspace()}
+            openingWorkspace={openingWorkspace}
             onPinSession={(id, pinned) => {
               if (!activeWorkspaceId) return
               void updateSession(

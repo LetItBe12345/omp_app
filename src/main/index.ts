@@ -11,6 +11,7 @@ import { RuntimeDiagnostics } from './runtime-diagnostics'
 import { RuntimeSupervisor } from './runtime-supervisor'
 import { listWorkspaceSessions } from './session-catalog'
 import { installNavigationSecurity, installSessionSecurity } from './security'
+import { configureLinuxFileChooser } from './linux-file-chooser'
 
 const development = Boolean(process.env['ELECTRON_RENDERER_URL'])
 const smokeMode = process.argv.includes('--smoke')
@@ -18,6 +19,7 @@ let mainWindow: BrowserWindow | null = null
 let smokeFinishing = false
 let shutdownStarted = false
 
+configureLinuxFileChooser(app.commandLine)
 app.setName('OMP Desktop')
 app.setPath('userData', join(app.getPath('appData'), 'OMP Desktop'))
 app.setAppLogsPath()

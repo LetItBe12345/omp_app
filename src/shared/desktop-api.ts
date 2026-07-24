@@ -145,6 +145,11 @@ export type WorkspaceOverview = {
   hasMore: boolean
 }
 
+export type WorkspaceActivation = {
+  workspace: WorkspaceSummary
+  snapshot: RuntimeSnapshot
+}
+
 export type SessionPage = {
   sessions: SessionSummary[]
   hasMore: boolean
@@ -182,6 +187,7 @@ export type DraftRecord = {
 
 export type RuntimeEvent =
   | { type: 'snapshot'; snapshot: RuntimeSnapshot }
+  | { type: 'workspace-activation-failed'; error: RuntimeError }
   | { type: 'provider-login'; state: ProviderLoginState }
   | { type: 'omp-event'; event: OmpEvent }
   | { type: 'omp-event-batch'; events: OmpEvent[] }
@@ -197,7 +203,7 @@ export type DesktopApi = {
   openExternal(url: string): Promise<boolean>
   openRuntimeLog(): Promise<boolean>
   revealPath(path: string): Promise<boolean>
-  chooseWorkspace(): Promise<DesktopResult<RuntimeSnapshot | null>>
+  chooseWorkspace(): Promise<DesktopResult<WorkspaceActivation | null>>
   getWorkspaces(offset?: number): Promise<DesktopResult<WorkspaceOverview>>
   activateWorkspace(
     workspaceId: string

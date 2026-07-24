@@ -1,4 +1,12 @@
-import { Archive, Folder, MessageSquare, Pin, Plus, Search } from 'lucide-react'
+import {
+  Archive,
+  Folder,
+  LoaderCircle,
+  MessageSquare,
+  Pin,
+  Plus,
+  Search
+} from 'lucide-react'
 import { useState } from 'react'
 import type {
   RuntimeSnapshot,
@@ -60,7 +68,8 @@ export function WorkspaceSidebar({
   onDeleteSession,
   onLoadMoreSessions,
   hasMoreSessions,
-  onLoadMoreWorkspaces
+  onLoadMoreWorkspaces,
+  openingWorkspace
 }: {
   runtime: RuntimeSnapshot
   overview: WorkspaceOverview
@@ -82,6 +91,7 @@ export function WorkspaceSidebar({
   onLoadMoreSessions: () => void
   hasMoreSessions: boolean
   onLoadMoreWorkspaces: () => void
+  openingWorkspace: boolean
 }): React.JSX.Element {
   const [menu, setMenu] = useState<MenuTarget | null>(null)
   const activeWorkspace = overview.workspaces.find(
@@ -121,18 +131,32 @@ export function WorkspaceSidebar({
             Workspace
           </span>
           <button
-            aria-label="打开 Workspace"
+            aria-label={
+              openingWorkspace ? '正在打开目录选择器' : '打开 Workspace'
+            }
             className="inline-grid size-8 place-items-center rounded-lg"
-            disabled={runtime.status === 'starting'}
+            disabled={openingWorkspace || runtime.status === 'starting'}
             onClick={(event) => {
               event.stopPropagation()
               onOpenWorkspace()
             }}
             type="button"
           >
-            <Plus size={15} />
+            {openingWorkspace ? (
+              <LoaderCircle className="animate-spin" size={15} />
+            ) : (
+              <Plus size={15} />
+            )}
           </button>
         </div>
+        {openingWorkspace && (
+          <p
+            className="mb-2 px-2 text-[11px] text-[var(--text-muted)]"
+            role="status"
+          >
+            正在打开目录选择器…
+          </p>
+        )}
         {overview.workspaces.length === 0 ? (
           <div className="empty-card mt-2" data-slot="workspace-empty-state">
             <Folder size={20} strokeWidth={1.6} />
@@ -151,6 +175,10 @@ export function WorkspaceSidebar({
                       ? 'bg-[var(--surface-selected)]'
                       : ''
                   }`}
+                  disabled={
+                    runtime.status === 'starting' ||
+                    runtime.status === 'stopping'
+                  }
                   onClick={() => onActivateWorkspace(workspace.id)}
                   onContextMenu={(event) =>
                     openMenu(event, {
