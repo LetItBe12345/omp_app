@@ -44,6 +44,38 @@ describe('RuntimeSupervisor', () => {
     })
   })
 
+  it('使用固定参数数组传入 Session 权限', async () => {
+    const fixture = resolve('tests/fixtures/fake-omp.mjs')
+    let spawnedArgs: string[] = []
+    supervisor = new RuntimeSupervisor({
+      runtimePath: process.execPath,
+      diagnostics,
+      runtimeVersion: '17.0.6',
+      spawnRuntime: (_executable, args, options) => {
+        spawnedArgs = args
+        return spawn(process.execPath, [fixture, ...args], {
+          ...options,
+          stdio: ['pipe', 'pipe', 'pipe']
+        })
+      }
+    })
+
+    const state = await supervisor.start(process.cwd(), process.env, 'write')
+
+    expect(spawnedArgs).toEqual([
+      '--mode',
+      'rpc',
+      '--cwd',
+      process.cwd(),
+      '--approval-mode',
+      'write'
+    ])
+    expect(state).toMatchObject({
+      approvalMode: 'write',
+      runtimeVersion: '17.0.6'
+    })
+  })
+
   it('关闭前刷新 Runtime 诊断日志', async () => {
     const flush = vi.spyOn(diagnostics, 'flush')
     await supervisor.start(process.cwd())

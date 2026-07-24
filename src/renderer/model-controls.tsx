@@ -11,16 +11,19 @@ import {
   Plus,
   RotateCcw,
   Search,
+  Shield,
   X
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type {
+  ApprovalMode,
   AvailableModel,
   LoginProvider,
   ModelSelection,
   ProviderLoginState,
   RuntimeSnapshot
 } from '../shared/desktop-api'
+import { APPROVAL_MODES, APPROVAL_MODE_LABELS } from '../shared/approval-mode'
 
 const thinkingLabels: Record<string, string> = {
   minimal: '最低',
@@ -64,6 +67,9 @@ type ModelControlsProps = {
   onSnapshot: (snapshot: RuntimeSnapshot) => void
   onRefreshModels: () => Promise<boolean>
   onRefreshProviders: () => Promise<boolean>
+  temporarySession?: boolean
+  temporaryApprovalMode?: ApprovalMode
+  onTemporaryApprovalMode?: (mode: ApprovalMode) => void
 }
 
 export function ModelControls({
@@ -75,11 +81,16 @@ export function ModelControls({
   modelsLoaded,
   onSnapshot,
   onRefreshModels,
-  onRefreshProviders
+  onRefreshProviders,
+  temporarySession = false,
+  temporaryApprovalMode = 'yolo',
+  onTemporaryApprovalMode
 }: ModelControlsProps): React.JSX.Element {
   const [modelOpen, setModelOpen] = useState(false)
   const [providerOpen, setProviderOpen] = useState(false)
   const [controlError, setControlError] = useState<string | null>(null)
+  const [approvalOpen, setApprovalOpen] = useState(false)
+  const approvalButtons = useRef<Array<HTMLButtonElement | null>>([])
   const effectiveSelection =
     runtime.pendingModelSelection ?? parseModel(runtime.model)
   const selectedModel = effectiveSelection
@@ -93,6 +104,9 @@ export function ModelControls({
     runtime.pendingModelSelection?.thinkingLevel ?? runtime.thinkingLevel
   const busy = runtime.isStreaming || runtime.queuedMessageCount > 0
   const ready = runtime.status === 'ready'
+  const approvalMode = temporarySession
+    ? temporaryApprovalMode
+    : (runtime.approvalMode ?? 'yolo')
 
   const providerNames = useMemo(
     () => new Map(providers.map((provider) => [provider.id, provider.name])),
@@ -159,6 +173,23 @@ export function ModelControls({
     const result = await window.desktop.cancelPendingModelSelection()
     if (result.ok) onSnapshot(result.data)
     else setControlError(result.error.message)
+  }
+
+  const selectApprovalMode = async (mode: ApprovalMode): Promise<void> => {
+    setApprovalOpen(false)
+    if (mode === approvalMode && runtime.approvalModeSaved !== false) return
+    setControlError(null)
+    if (temporarySession) {
+      onTemporaryApprovalMode?.(mode)
+      return
+    }
+    const result = await window.desktop.setApprovalMode(mode)
+    if (result.ok) onSnapshot(result.data)
+    else {
+      setControlError(result.error.message)
+      const state = await window.desktop.getRuntimeState()
+      if (state.ok) onSnapshot(state.data)
+    }
   }
 
   const modelButtonLabel = selectedModel?.name ?? runtime.model ?? '选择模型'
@@ -323,6 +354,82 @@ export function ModelControls({
               </Popover.Content>
             </Popover.Portal>
           )}
+        </Popover.Root>
+
+        <Popover.Root open={approvalOpen} onOpenChange={setApprovalOpen}>
+          <Popover.Trigger asChild>
+            <button
+              aria-label="选择权限"
+              className="composer-control"
+              disabled={
+                !ready ||
+                runtime.isAuthenticating ||
+                busy ||
+                (!temporarySession && !runtime.sessionId) ||
+                runtime.approvalModeChanging
+              }
+              type="button"
+            >
+              {runtime.approvalModeChanging ? (
+                <LoaderCircle className="animate-spin" size={14} />
+              ) : (
+                <Shield size={14} />
+              )}
+              <span>
+                权限：
+                {
+                  APPROVAL_MODE_LABELS[
+                    !temporarySession && !runtime.sessionId
+                      ? 'yolo'
+                      : approvalMode
+                  ]
+                }
+              </span>
+              <ChevronDown size={14} />
+            </button>
+          </Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Content
+              align="start"
+              className="popover-panel min-w-36 p-1.5"
+              onEscapeKeyDown={() => setApprovalOpen(false)}
+              onOpenAutoFocus={(event) => {
+                event.preventDefault()
+                const index = APPROVAL_MODES.indexOf(approvalMode)
+                approvalButtons.current[index]?.focus()
+              }}
+              sideOffset={6}
+            >
+              {APPROVAL_MODES.map((mode, index) => (
+                <button
+                  aria-checked={mode === approvalMode}
+                  className="command-item w-full"
+                  key={mode}
+                  onClick={() => void selectApprovalMode(mode)}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')
+                      return
+                    event.preventDefault()
+                    const direction = event.key === 'ArrowDown' ? 1 : -1
+                    const target =
+                      (index + direction + APPROVAL_MODES.length) %
+                      APPROVAL_MODES.length
+                    approvalButtons.current[target]?.focus()
+                  }}
+                  ref={(element) => {
+                    approvalButtons.current[index] = element
+                  }}
+                  role="menuitemradio"
+                  type="button"
+                >
+                  <span className="flex-1 text-left">
+                    {APPROVAL_MODE_LABELS[mode]}
+                  </span>
+                  {mode === approvalMode && <Check size={15} />}
+                </button>
+              ))}
+            </Popover.Content>
+          </Popover.Portal>
         </Popover.Root>
 
         {runtime.pendingModelSelection && (

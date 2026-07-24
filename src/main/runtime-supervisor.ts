@@ -3,11 +3,14 @@ import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import {
+  execFile,
   spawn,
   type ChildProcessWithoutNullStreams,
   type SpawnOptions
 } from 'node:child_process'
+import { promisify } from 'node:util'
 import type {
+  ApprovalMode,
   AvailableModel,
   LoginProvider,
   ModelSelection,
@@ -49,6 +52,7 @@ export type RuntimeSupervisorOptions = {
   readyTimeoutMs?: number
   stopTimeoutMs?: number
   now?: () => number
+  runtimeVersion?: string
 }
 
 const STATE_TIMEOUT_MS = 5_000
@@ -56,6 +60,7 @@ const MUTATION_TIMEOUT_MS = 15_000
 const STOP_TIMEOUT_MS = 5_000
 const TERM_TIMEOUT_MS = 2_000
 const CRASH_WINDOW_MS = 60_000
+const execFileAsync = promisify(execFile)
 
 export class RuntimeFailure extends Error implements RuntimeError {
   constructor(
@@ -122,11 +127,14 @@ export class RuntimeSupervisor extends EventEmitter {
   #stoppingCurrentRun = false
   #parseErrorTimes: number[] = []
   #recentDiagnostics: string[] = []
+  #runtimeVersion?: string
+  #versionResolved = false
   #snapshot: RuntimeSnapshot = {
     status: 'stopped',
     isStreaming: false,
     queuedMessageCount: 0,
-    isAuthenticating: false
+    isAuthenticating: false,
+    approvalMode: 'yolo'
   }
 
   constructor(options: RuntimeSupervisorOptions) {
@@ -137,6 +145,8 @@ export class RuntimeSupervisor extends EventEmitter {
     this.#readyTimeoutMs = options.readyTimeoutMs ?? 15_000
     this.#stopTimeoutMs = options.stopTimeoutMs ?? STOP_TIMEOUT_MS
     this.#now = options.now ?? Date.now
+    this.#runtimeVersion = options.runtimeVersion
+    this.#versionResolved = options.runtimeVersion !== undefined
   }
 
   get snapshot(): RuntimeSnapshot {
@@ -151,25 +161,59 @@ export class RuntimeSupervisor extends EventEmitter {
     this.#diagnostics.write(message)
   }
 
+  setApprovalState(
+    approvalMode: ApprovalMode,
+    approvalModeChanging = false,
+    approvalModeSaved = true
+  ): RuntimeSnapshot {
+    this.#setSnapshot({
+      approvalMode,
+      approvalModeChanging,
+      approvalModeSaved
+    })
+    return this.snapshot
+  }
+
+  setToolApprovals(
+    toolApprovals: RuntimeSnapshot['toolApprovals']
+  ): RuntimeSnapshot {
+    this.#setSnapshot({ toolApprovals })
+    return this.snapshot
+  }
+
+  setCompatibilityNotice(message: string | undefined): RuntimeSnapshot {
+    this.#setSnapshot({ compatibilityNotice: message })
+    return this.snapshot
+  }
+
   async start(
     workspacePath: string,
-    env: NodeJS.ProcessEnv = process.env
+    env: NodeJS.ProcessEnv = process.env,
+    approvalMode: ApprovalMode = this.#snapshot.approvalMode ?? 'yolo'
   ): Promise<RuntimeSnapshot> {
     if (this.#startPromise) return this.#startPromise
-    this.#startPromise = this.#start(workspacePath, env).finally(() => {
-      this.#startPromise = null
-    })
+    this.#startPromise = this.#start(workspacePath, env, approvalMode).finally(
+      () => {
+        this.#startPromise = null
+      }
+    )
     return this.#startPromise
   }
 
-  async restart(): Promise<RuntimeSnapshot> {
+  async restart(
+    approvalMode: ApprovalMode = this.#snapshot.approvalMode ?? 'yolo'
+  ): Promise<RuntimeSnapshot> {
     const workspacePath = this.#snapshot.workspacePath
     if (!workspacePath) {
       throw new RuntimeFailure('INVALID_ARGUMENT', '尚未选择 Workspace', false)
     }
     const sessionPath = this.#snapshot.sessionPath
     await this.stop()
-    const snapshot = await this.start(workspacePath, this.#workspaceEnv)
+    const snapshot = await this.start(
+      workspacePath,
+      this.#workspaceEnv,
+      approvalMode
+    )
     if (sessionPath) await this.#restoreSession(sessionPath)
     return this.snapshot.status === 'ready' ? this.snapshot : snapshot
   }
@@ -655,9 +699,11 @@ export class RuntimeSupervisor extends EventEmitter {
 
   async #start(
     workspacePath: string,
-    env: NodeJS.ProcessEnv
+    env: NodeJS.ProcessEnv,
+    approvalMode: ApprovalMode
   ): Promise<RuntimeSnapshot> {
     await this.#validateStartPaths(workspacePath)
+    await this.#resolveRuntimeVersion()
     if (this.#snapshot.workspacePath !== workspacePath) this.#lastCrashAt = 0
     if (this.#child) await this.stop()
 
@@ -674,12 +720,25 @@ export class RuntimeSupervisor extends EventEmitter {
       isStreaming: false,
       isAuthenticating: false,
       queuedMessageCount: 0,
+      approvalMode,
+      approvalModeChanging: this.#snapshot.approvalModeChanging === true,
+      approvalModeSaved: true,
+      runtimeVersion: this.#runtimeVersion,
+      toolApprovals: [],
+      compatibilityNotice: undefined,
       error: undefined
     })
 
     const child = this.#spawnRuntime(
       this.#runtimePath,
-      ['--mode', 'rpc', '--cwd', workspacePath],
+      [
+        '--mode',
+        'rpc',
+        '--cwd',
+        workspacePath,
+        '--approval-mode',
+        approvalMode
+      ],
       {
         cwd: workspacePath,
         env: this.#workspaceEnv,
@@ -1014,6 +1073,28 @@ export class RuntimeSupervisor extends EventEmitter {
     }
     if (!runtime?.isFile()) {
       throw new RuntimeFailure('START_FAILED', 'OMP Runtime 不存在', false)
+    }
+  }
+
+  async #resolveRuntimeVersion(): Promise<void> {
+    if (this.#versionResolved) return
+    this.#versionResolved = true
+    try {
+      const { stdout, stderr } = await execFileAsync(
+        this.#runtimePath,
+        ['--version'],
+        { timeout: 2_000, maxBuffer: 64 * 1024 }
+      )
+      const match = /(?:omp\/)?(\d+\.\d+\.\d+)/u.exec(
+        `${stdout}${stderr}`.trim()
+      )
+      this.#runtimeVersion = match?.[1]
+    } catch (error) {
+      this.#diagnostics.write(
+        `读取 OMP 版本失败: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      )
     }
   }
 

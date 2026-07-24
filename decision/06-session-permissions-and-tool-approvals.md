@@ -1,6 +1,6 @@
 # 决策记录 06：Session 权限与工具审批
 
-- 对应任务：`TODO/in-progress/06-session-permissions-and-tool-approvals.md`
+- 对应任务：`TODO/done/06-session-permissions-and-tool-approvals.md`
 - 确认日期：2026-07-23
 - 适用版本：OMP v17.0.6
 

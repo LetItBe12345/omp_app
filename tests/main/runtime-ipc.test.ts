@@ -481,6 +481,59 @@ describe('registerRuntimeIpc', () => {
     cleanup()
   })
 
+  it('v17.0.6 工具审批只向 Renderer 投影摘要并按截止时间自动允许', async () => {
+    vi.useFakeTimers()
+    try {
+      const { registerRuntimeIpc } = await import('../../src/main/runtime-ipc')
+      const harness = createHarness()
+      Object.assign(harness.supervisor.snapshot, {
+        workspacePath: '/workspace',
+        sessionId: 'session-1',
+        runtimeVersion: '17.0.6'
+      })
+      const cleanup = registerRuntimeIpc(
+        harness.supervisor as unknown as RuntimeSupervisor,
+        createStateStore(),
+        harness.getWindow
+      )
+      const request = {
+        type: 'extension_ui_request',
+        id: 'approval-1',
+        method: 'select',
+        title:
+          'Allow tool: write\nPath: /workspace/src/app.ts\nContent:\nprivate-content',
+        options: ['Approve', 'Deny'],
+        timeout: 1_000
+      }
+
+      harness.emitter.emit('event', request)
+      await vi.advanceTimersByTimeAsync(100)
+      expect(harness.supervisor.setToolApprovals).toHaveBeenCalledWith([
+        expect.objectContaining({
+          id: 'approval-1',
+          summary: '写入 · src/app.ts',
+          status: 'pending'
+        })
+      ])
+      expect(JSON.stringify(electron.send.mock.calls)).not.toContain(
+        'private-content'
+      )
+
+      await vi.advanceTimersByTimeAsync(900)
+      expect(harness.supervisor.sendFrame).toHaveBeenCalledWith({
+        type: 'extension_ui_response',
+        id: 'approval-1',
+        value: 'Approve'
+      })
+      expect(harness.supervisor.setToolApprovals).toHaveBeenCalledWith([
+        expect.objectContaining({ status: 'auto-approved' })
+      ])
+      cleanup()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('事件批次达到数量、字节和单事件上限时立即发送', async () => {
     vi.useFakeTimers()
     try {
@@ -611,9 +664,13 @@ type HarnessSupervisor = EventEmitter & {
   start: ReturnType<typeof vi.fn>
   stopCurrentRun: ReturnType<typeof vi.fn>
   switchSession: ReturnType<typeof vi.fn>
+  setToolApprovals: ReturnType<typeof vi.fn>
+  setCompatibilityNotice: ReturnType<typeof vi.fn>
   snapshot: {
     status: string
     workspacePath?: string
+    sessionId?: string
+    runtimeVersion?: string
     isStreaming: boolean
     queuedMessageCount: number
   }
@@ -634,6 +691,8 @@ function createHarness(): {
     start: vi.fn(),
     stopCurrentRun: vi.fn(),
     switchSession: vi.fn(),
+    setToolApprovals: vi.fn(),
+    setCompatibilityNotice: vi.fn(),
     snapshot: {
       status: 'ready',
       isStreaming: false,

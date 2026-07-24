@@ -3,6 +3,7 @@ import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { PerformanceEntry, RendererLogEntry } from '../shared/desktop-api'
 import { IPC_CHANNELS } from '../shared/desktop-api'
+import { isApprovalMode } from '../shared/approval-mode'
 import { validateExternalUrl } from './external-url'
 import { initializeLogger, log, recordMainPerformance } from './logger'
 import { DesktopStateStore } from './desktop-state'
@@ -47,7 +48,24 @@ async function restoreRuntimeState(): Promise<void> {
   if (!workspace) return
 
   try {
-    await runtimeSupervisor.start(workspace.path)
+    const storedMode = workspace.activeSessionId
+      ? desktopStateStore.sessionPreference(
+          workspace.id,
+          workspace.activeSessionId
+        ).approvalMode
+      : undefined
+    const approvalMode = isApprovalMode(storedMode) ? storedMode : 'yolo'
+    if (workspace.activeSessionId && !storedMode) {
+      runtimeSupervisor.recordDiagnostic(
+        `Session 权限缺失或无效，按 yolo 补存: session=${workspace.activeSessionId}`
+      )
+      await desktopStateStore
+        .updateSessionPreference(workspace.id, workspace.activeSessionId, {
+          approvalMode: 'yolo'
+        })
+        .catch((error: unknown) => log.warn('补存 Session 默认权限失败', error))
+    }
+    await runtimeSupervisor.start(workspace.path, process.env, approvalMode)
     if (workspace.activeSessionId) {
       try {
         const sessions = await listWorkspaceSessions(

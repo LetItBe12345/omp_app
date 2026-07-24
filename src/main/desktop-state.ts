@@ -9,10 +9,12 @@ import {
 } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import type {
+  ApprovalMode,
   SessionSummary,
   WorkspaceOverview,
   WorkspaceSummary
 } from '../shared/desktop-api'
+import { isApprovalMode } from '../shared/approval-mode'
 
 export type StoredWorkspace = {
   id: string
@@ -26,7 +28,7 @@ export type StoredWorkspace = {
 export type SessionPreference = {
   pinned?: boolean
   archived?: boolean
-  approvalMode?: string
+  approvalMode?: ApprovalMode
 }
 
 export type DesktopState = {
@@ -190,9 +192,19 @@ export class DesktopStateStore {
   }
 
   sessionPreference(workspaceId: string, sessionId: string): SessionPreference {
-    return structuredClone(
+    const preference =
       this.#state.sessionPreferences[workspaceId]?.[sessionId] ?? {}
-    )
+    return {
+      ...(typeof preference.pinned === 'boolean'
+        ? { pinned: preference.pinned }
+        : {}),
+      ...(typeof preference.archived === 'boolean'
+        ? { archived: preference.archived }
+        : {}),
+      ...(isApprovalMode(preference.approvalMode)
+        ? { approvalMode: preference.approvalMode }
+        : {})
+    }
   }
 
   async updateSessionPreference(

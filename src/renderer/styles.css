@@ -298,6 +298,88 @@ body {
   margin: -2.5rem 0.5rem 0 auto;
 }
 
+.tool-approval-panel {
+  margin-top: 0.75rem;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--surface-panel);
+}
+
+.tool-approval-heading,
+.tool-approval-row,
+.tool-approval-batch {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.tool-approval-heading {
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 0.55rem 0.7rem;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+}
+
+.tool-approval-list {
+  max-height: 12.5rem;
+  overflow-y: auto;
+}
+
+.tool-approval-row {
+  min-height: 2.5rem;
+  padding: 0.45rem 0.7rem;
+}
+
+.tool-approval-row + .tool-approval-row {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.tool-approval-summary {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+}
+
+.tool-approval-actions,
+.tool-approval-batch {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.35rem;
+}
+
+.tool-approval-actions button,
+.tool-approval-batch button {
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
+  padding: 0.25rem 0.55rem;
+  background: white;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+}
+
+.tool-approval-actions button:focus-visible,
+.tool-approval-batch button:focus-visible {
+  outline: 2px solid #73736d;
+  outline-offset: 1px;
+}
+
+.tool-approval-status {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.tool-approval-batch {
+  justify-content: flex-end;
+  border-top: 1px solid var(--border-subtle);
+  padding: 0.55rem 0.7rem;
+}
+
 .thread-scroll-bottom {
   right: 1.5rem;
   bottom: 1.25rem;
