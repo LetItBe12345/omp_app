@@ -50,6 +50,7 @@ if (typeof window !== 'undefined') {
         .fn()
         .mockResolvedValue({ ok: true, data: undefined }),
       followUp: vi.fn().mockResolvedValue({ ok: true, data: undefined }),
+      getAvailableCommands: vi.fn().mockResolvedValue({ ok: true, data: [] }),
       getRuntimeState: vi.fn().mockResolvedValue({
         ok: true,
         data: {

@@ -72,8 +72,10 @@ export type InteractionItem = {
 export type ArtifactItem = {
   id: string
   kind: 'artifact'
+  artifact: 'command-result'
   label: string
   value: string
+  copyText: string
 }
 
 export type TurnItem =
@@ -152,6 +154,15 @@ function stringValue(value: unknown): string | undefined {
 
 function normalizeToolName(value: unknown): string {
   return typeof value === 'string' && value.trim() ? value.trim() : '工具'
+}
+
+const ANSI_PATTERN = new RegExp(
+  String.raw`\u001B(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007\u001B]*(?:\u0007|\u001B\\))`,
+  'gu'
+)
+
+function stripAnsi(value: string): string {
+  return value.replace(ANSI_PATTERN, '')
 }
 
 export function classifyAction(toolName: string): ActionCategory {
@@ -257,6 +268,13 @@ function currentTurn(
   state.turns.push(turn)
   state.activeTurnId = turn.id
   return turn
+}
+
+function currentCommandResult(turn: AssistantTurn): ArtifactItem | undefined {
+  return turn.items.findLast(
+    (item): item is ArtifactItem =>
+      item.kind === 'artifact' && item.artifact === 'command-result'
+  )
 }
 
 function messageId(
@@ -640,6 +658,19 @@ function finishTurn(
   state.activeMessageId = undefined
 }
 
+function finishLocalTurn(state: ConversationProjection, now: number): void {
+  const turn = currentTurn(state, false)
+  if (!turn) return
+  if (turn.waitingStartedAt !== undefined) {
+    turn.waitingDurationMs += Math.max(0, now - turn.waitingStartedAt)
+    turn.waitingStartedAt = undefined
+  }
+  turn.endedAt = now
+  turn.status = 'completed'
+  state.activeTurnId = undefined
+  state.activeMessageId = undefined
+}
+
 function cloneProjection(
   projection: ConversationProjection
 ): ConversationProjection {
@@ -729,11 +760,39 @@ export function reduceOmpEvent(
       if (turn && message) turn.diagnostics.push(message)
       break
     }
+    case 'command_output': {
+      const text = stripAnsi(stringValue(event['text']) ?? '')
+      if (!text.trim()) break
+      const turn = currentTurn(state)
+      if (!turn) break
+      turn.startedAt ??= now
+      turn.status = 'running'
+      const existing = currentCommandResult(turn)
+      if (existing) {
+        existing.value += text
+        existing.copyText += text
+      } else {
+        turn.items.push({
+          id: nextId(state, 'artifact'),
+          kind: 'artifact',
+          artifact: 'command-result',
+          label: '命令结果',
+          value: text,
+          copyText: text
+        })
+      }
+      break
+    }
     case 'turn_start':
     case 'turn_end':
+    case 'config_update':
+    case 'session_info_update':
       break
     case 'agent_end':
       finishTurn(state, event, now)
+      break
+    case 'prompt_result':
+      if (event['agentInvoked'] === false) finishLocalTurn(state, now)
       break
   }
   return state
