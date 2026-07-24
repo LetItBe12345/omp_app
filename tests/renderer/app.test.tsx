@@ -71,7 +71,8 @@ describe('App shell', () => {
     fireEvent.keyDown(composer, { key: 'Enter' })
     await waitFor(() =>
       expect(window.desktop.followUp).toHaveBeenCalledWith({
-        message: '补充测试'
+        message: '补充测试',
+        references: []
       })
     )
 
@@ -193,5 +194,53 @@ describe('App shell', () => {
     expect(
       screen.getByRole('combobox', { name: '模型选择器' })
     ).toBeInTheDocument()
+  })
+
+  it('新建按钮先打开临时输入，首条发送时才创建真实 Session', async () => {
+    vi.mocked(window.desktop.getWorkspaces).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        activeWorkspaceId: 'workspace-1',
+        workspaces: [
+          {
+            id: 'workspace-1',
+            path: '/tmp/workspace',
+            name: 'workspace',
+            available: true,
+            pinned: false,
+            addedAt: '2026-01-01T00:00:00.000Z',
+            lastUsedAt: '2026-01-01T00:00:00.000Z'
+          }
+        ],
+        hasMore: false
+      }
+    })
+    vi.mocked(window.desktop.getRuntimeState).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        status: 'ready',
+        workspacePath: '/tmp/workspace',
+        sessionId: 'session-1',
+        isStreaming: false,
+        queuedMessageCount: 0
+      }
+    })
+    render(<App />)
+
+    const newButton = await screen.findByRole('button', { name: '新建对话' })
+    await waitFor(() => expect(newButton).toBeEnabled())
+    fireEvent.click(newButton)
+    expect(window.desktop.newSession).not.toHaveBeenCalled()
+
+    const composer = screen.getByRole('textbox', { name: '任务输入' })
+    fireEvent.change(composer, { target: { value: '第一条消息' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送' }))
+
+    await waitFor(() =>
+      expect(window.desktop.createSession).toHaveBeenCalledWith(
+        { message: '第一条消息', references: [] },
+        '第一条消息'
+      )
+    )
   })
 })

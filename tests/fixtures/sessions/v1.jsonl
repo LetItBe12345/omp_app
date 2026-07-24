@@ -1,0 +1,3 @@
+{"type":"session","id":"session-v1","timestamp":"2025-01-01T00:00:00.000Z","cwd":"/tmp/omp-workspace","title":"V1 会话"}
+{"type":"message","id":"m1","parentId":null,"timestamp":"2025-01-01T00:00:01.000Z","message":{"role":"user","content":"检查 v1"}}
+{"type":"message","id":"m2","parentId":"m1","timestamp":"2025-01-01T00:00:02.000Z","message":{"role":"assistant","content":[{"type":"text","text":"v1 正常"}],"stopReason":"stop"}}

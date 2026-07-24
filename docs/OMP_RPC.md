@@ -100,7 +100,29 @@ Desktop 启动 `omp --mode rpc` 时通过子进程 `env` 传入 PATH、普通环
 
 环境或代理发生变化时，Desktop 需要重启 OMP Runtime，再恢复当前 Session。
 
-MVP 的普通 Renderer 不暴露 `bash`。MVP 也不调用 `set_host_tools` 或 `set_host_uri_schemes`；如果意外收到 Host Tool 或 Host URI 请求，Main 明确返回“不支持”，不能静默悬挂。
+MVP 的普通 Renderer 不暴露 `bash`，也不调用 `set_host_tools`。MVP 通过 `set_host_uri_schemes` 注册只读的 `omp-session`，供 `@session` 按需读取；其他 Host Tool 或 Host URI 请求明确返回“不支持”，不能静默悬挂。
+
+### Session 列表与 JSONL 兼容
+
+OMP 17.0.6 没有列出或删除 Session 的 RPC。Desktop 的 Session 列表只读扫描：
+
+```text
+~/.omp/agent/sessions/<cwd 编码>/*.jsonl
+```
+
+文件名为 `<ISO 时间的安全形式>_<session-id>.jsonl`。Session ID 的最终依据仍是 JSONL 头部的 `id`，不能只信文件名。头部至少包含 `type: "session"`、`id`、`timestamp` 和 `cwd`。
+
+| JSONL 版本 | 识别方式                                          | Desktop 行为           |
+| ---------- | ------------------------------------------------- | ---------------------- |
+| v1         | 头部没有 `version`，或 `version: 1`               | 只读列出和恢复         |
+| v2         | `version: 2`                                      | 只读列出和恢复         |
+| v3         | `version: 3`，可能在头部前有固定宽度 `title` 条目 | 只读列出和恢复         |
+| 高于 v3    | `version > 3`                                     | 显示为不兼容，不能打开 |
+| 损坏       | 头部、ID、cwd、时间或 JSONL 无效                  | 隔离显示，不能打开     |
+
+Desktop 不迁移或重写 Session JSONL。切换前，Main 会再次核对文件位于当前 Workspace 对应的 Session 目录，并确认头部 `id`、`cwd` 和当前 Workspace 一致。删除使用系统废纸篓，不直接永久删除。
+
+`omp-session://<workspace-id>/<session-id>` 只在当前 Workspace 内解析。每页最多返回 50 KiB，只包含最新压缩摘要、首条用户消息以及最近 10 轮可见用户/Assistant 对话；Thinking、Tool 参数和 Tool Result 不返回。
 
 ---
 
@@ -371,7 +393,7 @@ Host Tools 是 RPC 的后续扩展能力，不进入 MVP。
 3. Stop 和逐条 Follow-up；MVP 不提供 Steer
 4. 模型和 Thinking 选择
 5. Session 新建、切换、历史
-6. 核心 Extension UI；不注册 Host Tool 或 Host URI
+6. 核心 Extension UI；不注册 Host Tool，只注册只读 `omp-session` Host URI
 7. 一个 OMP 进程对应一个活跃 Workspace
 
 现有 RPC 已经覆盖这些核心需求。真正缺的是 Electron UI 层，不是 Runtime 能力。

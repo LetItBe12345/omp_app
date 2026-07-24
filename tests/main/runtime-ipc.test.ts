@@ -1,7 +1,19 @@
 import { EventEmitter } from 'node:events'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { IPC_CHANNELS } from '../../src/shared/desktop-api'
+import type { DesktopStateStore } from '../../src/main/desktop-state'
 import type { RuntimeSupervisor } from '../../src/main/runtime-supervisor'
+
+function createStateStore(): DesktopStateStore {
+  return {
+    state: {
+      version: 1,
+      workspaces: [],
+      sessionPreferences: {},
+      ui: {}
+    }
+  } as unknown as DesktopStateStore
+}
 
 const electron = vi.hoisted(() => ({
   openExternal: vi.fn(),
@@ -70,6 +82,7 @@ describe('registerRuntimeIpc', () => {
     }
     const cleanup = registerRuntimeIpc(
       supervisor,
+      createStateStore(),
       () => ({ isDestroyed: () => false, webContents }) as never
     )
     const request = {
@@ -108,6 +121,7 @@ describe('registerRuntimeIpc', () => {
     )
     const cleanup = registerRuntimeIpc(
       harness.supervisor as unknown as RuntimeSupervisor,
+      createStateStore(),
       harness.getWindow
     )
 
@@ -163,6 +177,7 @@ describe('registerRuntimeIpc', () => {
     electron.openExternal.mockRejectedValueOnce(new Error('browser failed'))
     const cleanup = registerRuntimeIpc(
       harness.supervisor as unknown as RuntimeSupervisor,
+      createStateStore(),
       harness.getWindow
     )
     void electron.handlers.get(IPC_CHANNELS.loginProvider)?.(
@@ -200,6 +215,7 @@ describe('registerRuntimeIpc', () => {
       )
     const cleanup = registerRuntimeIpc(
       harness.supervisor as unknown as RuntimeSupervisor,
+      createStateStore(),
       harness.getWindow
     )
 
@@ -230,6 +246,7 @@ describe('registerRuntimeIpc', () => {
       .mockRejectedValue(new Error('Provider requires interactive prompts'))
     let cleanup = registerRuntimeIpc(
       terminalHarness.supervisor as unknown as RuntimeSupervisor,
+      createStateStore(),
       terminalHarness.getWindow
     )
     await expect(
@@ -256,6 +273,7 @@ describe('registerRuntimeIpc', () => {
     )
     cleanup = registerRuntimeIpc(
       timeoutHarness.supervisor as unknown as RuntimeSupervisor,
+      createStateStore(),
       timeoutHarness.getWindow
     )
     const timedLogin = electron.handlers.get(IPC_CHANNELS.loginProvider)?.(
@@ -287,6 +305,7 @@ describe('registerRuntimeIpc', () => {
     )
     cleanup = registerRuntimeIpc(
       cancelHarness.supervisor as unknown as RuntimeSupervisor,
+      createStateStore(),
       cancelHarness.getWindow
     )
     const cancelledLogin = electron.handlers.get(IPC_CHANNELS.loginProvider)?.(
@@ -322,6 +341,7 @@ describe('registerRuntimeIpc', () => {
     harness.supervisor.loginProvider = vi.fn(() => new Promise(() => undefined))
     const cleanup = registerRuntimeIpc(
       harness.supervisor as unknown as RuntimeSupervisor,
+      createStateStore(),
       harness.getWindow
     )
     void electron.handlers.get(IPC_CHANNELS.loginProvider)?.(
@@ -344,7 +364,7 @@ describe('registerRuntimeIpc', () => {
     cleanup()
   })
 
-  it('切换 Session 和 Workspace 前先停止并应用旧执行链状态', async () => {
+  it('执行链未结束时拒绝切换 Session 和 Workspace', async () => {
     const { registerRuntimeIpc } = await import('../../src/main/runtime-ipc')
     const harness = createHarness()
     harness.supervisor.snapshot = {
@@ -352,49 +372,34 @@ describe('registerRuntimeIpc', () => {
       isStreaming: true,
       queuedMessageCount: 0
     }
-    harness.supervisor.stopCurrentRun.mockResolvedValue(null)
-    harness.supervisor.switchSession.mockResolvedValue({
-      status: 'ready',
-      isStreaming: false,
-      queuedMessageCount: 0
-    })
-    harness.supervisor.start.mockResolvedValue({
-      status: 'ready',
-      workspacePath: '/tmp/new-workspace',
-      isStreaming: false,
-      queuedMessageCount: 0
-    })
-    electron.showMessageBox.mockResolvedValue({ response: 1 })
     electron.showOpenDialog.mockResolvedValue({
       canceled: false,
       filePaths: ['/tmp/new-workspace']
     })
     const cleanup = registerRuntimeIpc(
       harness.supervisor as unknown as RuntimeSupervisor,
+      createStateStore(),
       harness.getWindow
     )
 
-    await electron.handlers.get(IPC_CHANNELS.switchSession)?.(
-      harness.event,
-      'session-2'
-    )
-    expect(harness.supervisor.stopCurrentRun).toHaveBeenCalledTimes(1)
-    expect(harness.supervisor.switchSession).toHaveBeenCalledWith('session-2')
-    expect(
-      harness.supervisor.stopCurrentRun.mock.invocationCallOrder[0]
-    ).toBeLessThan(
-      harness.supervisor.switchSession.mock.invocationCallOrder[0] ?? Infinity
-    )
+    const sessionResult = await electron.handlers.get(
+      IPC_CHANNELS.switchSession
+    )?.(harness.event, 'session-2')
+    expect(sessionResult).toMatchObject({
+      ok: false,
+      error: { code: 'RUNTIME_NOT_READY' }
+    })
+    expect(harness.supervisor.stopCurrentRun).not.toHaveBeenCalled()
+    expect(harness.supervisor.switchSession).not.toHaveBeenCalled()
 
-    harness.supervisor.snapshot.isStreaming = true
-    await electron.handlers.get(IPC_CHANNELS.chooseWorkspace)?.(harness.event)
-    expect(harness.supervisor.stopCurrentRun).toHaveBeenCalledTimes(2)
-    expect(harness.supervisor.start).toHaveBeenCalledWith('/tmp/new-workspace')
-    expect(
-      harness.supervisor.stopCurrentRun.mock.invocationCallOrder[1]
-    ).toBeLessThan(
-      harness.supervisor.start.mock.invocationCallOrder[0] ?? Infinity
-    )
+    const workspaceResult = await electron.handlers.get(
+      IPC_CHANNELS.chooseWorkspace
+    )?.(harness.event)
+    expect(workspaceResult).toMatchObject({
+      ok: false,
+      error: { code: 'RUNTIME_NOT_READY' }
+    })
+    expect(harness.supervisor.start).not.toHaveBeenCalled()
     cleanup()
   })
 
@@ -405,6 +410,7 @@ describe('registerRuntimeIpc', () => {
       const harness = createHarness()
       const cleanup = registerRuntimeIpc(
         harness.supervisor as unknown as RuntimeSupervisor,
+        createStateStore(),
         harness.getWindow
       )
 
@@ -464,6 +470,7 @@ describe('registerRuntimeIpc', () => {
       const harness = createHarness()
       const cleanup = registerRuntimeIpc(
         harness.supervisor as unknown as RuntimeSupervisor,
+        createStateStore(),
         harness.getWindow
       )
 

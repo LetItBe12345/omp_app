@@ -4,8 +4,6 @@ import {
   FileText,
   Folder,
   MessageSquare,
-  Plus,
-  Search,
   Settings2
 } from 'lucide-react'
 import { ComposerPrimitive } from '@assistant-ui/react'
@@ -20,10 +18,15 @@ import { Group, Panel, Separator } from 'react-resizable-panels'
 import { uiFixture } from '../../tests/fixtures/ui-fixture'
 import type {
   AvailableModel,
+  ContextReference,
   LoginProvider,
   ProviderLoginState,
-  RuntimeSnapshot
+  PromptInput,
+  RuntimeSnapshot,
+  SessionSummary,
+  WorkspaceOverview
 } from '../shared/desktop-api'
+import { ContextReferences } from './context-references'
 import { ModelControls } from './model-controls'
 import { ConversationRuntime, ThreadMessages } from './conversation-thread'
 import {
@@ -34,8 +37,21 @@ import {
   type ConversationProjection
 } from './omp-event-reducer'
 import { strings } from './strings'
+import {
+  cleanExpiredDrafts,
+  clearDraft,
+  loadDraft,
+  saveDraft
+} from './draft-store'
+import { WorkspaceSidebar } from './workspace-sidebar'
 
 const fixture = __OMP_UI_FIXTURE__ ? uiFixture : null
+const runtimeSessionKey = (
+  snapshot: Pick<RuntimeSnapshot, 'workspacePath' | 'sessionId'>
+): string | undefined =>
+  snapshot.workspacePath && snapshot.sessionId
+    ? `${snapshot.workspacePath}:${snapshot.sessionId}`
+    : undefined
 const knownOmpEventTypes = new Set([
   'agent_start',
   'agent_end',
@@ -81,92 +97,6 @@ function IconButton({
     >
       {icon}
     </button>
-  )
-}
-
-function ConversationSidebar({
-  runtime,
-  onOpenWorkspace
-}: {
-  runtime: RuntimeSnapshot
-  onOpenWorkspace: () => void
-}): React.JSX.Element {
-  return (
-    <aside
-      className="panel-surface flex h-full min-w-0 flex-col"
-      data-slot="conversation-sidebar"
-    >
-      <div className="flex h-16 items-center justify-between px-5">
-        <h1 className="text-[15px] font-semibold">{strings.conversations}</h1>
-        <IconButton label={strings.newConversation} icon={<Plus size={17} />} />
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
-        <div className="mb-2 flex items-center justify-between px-2">
-          <span className="text-xs font-medium text-[var(--text-secondary)]">
-            {strings.workspaces}
-          </span>
-          <IconButton
-            label={strings.openWorkspace}
-            icon={<Plus size={15} />}
-            disabled={runtime.status === 'starting'}
-            onClick={onOpenWorkspace}
-          />
-        </div>
-
-        {fixture || runtime.workspacePath ? (
-          <>
-            <div className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-white px-3 py-2.5 text-sm shadow-xs">
-              <Folder size={16} />
-              <span className="truncate font-medium">
-                {fixture?.workspace ?? runtime.workspacePath?.split('/').at(-1)}
-              </span>
-            </div>
-            <p className="mt-7 mb-2 px-2 text-[11px] font-medium text-[var(--text-muted)]">
-              最近
-            </p>
-            <ul className="space-y-1">
-              {(fixture?.conversations ?? []).map((conversation, index) => (
-                <li key={conversation}>
-                  <button
-                    className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm ${index === 0 ? 'bg-[var(--surface-selected)]' : ''}`}
-                    type="button"
-                  >
-                    <MessageSquare
-                      className="shrink-0 text-[var(--text-muted)]"
-                      size={15}
-                    />
-                    <span className="truncate">{conversation}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </>
-        ) : (
-          <div className="empty-card mt-2" data-slot="workspace-empty-state">
-            <Folder size={20} strokeWidth={1.6} />
-            <p className="mt-3 text-sm font-medium">{strings.noWorkspace}</p>
-            <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
-              {strings.noWorkspaceHint}
-            </p>
-          </div>
-        )}
-      </div>
-
-      <div className="border-t border-[var(--border)] p-3">
-        <button
-          className="disabled-control w-full justify-start"
-          type="button"
-          disabled
-        >
-          <Search size={15} />
-          <span>{strings.search}</span>
-          <kbd className="ml-auto text-[10px] text-[var(--text-muted)]">
-            Ctrl K
-          </kbd>
-        </button>
-      </div>
-    </aside>
   )
 }
 
@@ -235,7 +165,17 @@ function Conversation({
   catalogError,
   modelsLoaded,
   onRefreshModels,
-  onRefreshProviders
+  onRefreshProviders,
+  workspaceId,
+  references,
+  onReferences,
+  temporarySession,
+  onSessionCreated,
+  openingSession,
+  recentReferences,
+  onSentReferences,
+  attachments,
+  onAttachments
 }: {
   runtime: RuntimeSnapshot
   onSnapshot: (snapshot: RuntimeSnapshot) => void
@@ -250,6 +190,16 @@ function Conversation({
   modelsLoaded: boolean
   onRefreshModels: () => Promise<boolean>
   onRefreshProviders: () => Promise<boolean>
+  workspaceId?: string
+  references: ContextReference[]
+  onReferences: (references: ContextReference[]) => void
+  temporarySession: boolean
+  onSessionCreated: (snapshot: RuntimeSnapshot) => void
+  openingSession: boolean
+  recentReferences: ContextReference[]
+  onSentReferences: (references: ContextReference[]) => void
+  attachments: NonNullable<PromptInput['images']>
+  onAttachments: (attachments: NonNullable<PromptInput['images']>) => void
 }): React.JSX.Element {
   const [stopping, setStopping] = useState(false)
   const [sending, setSending] = useState(false)
@@ -307,19 +257,41 @@ function Conversation({
 
   const send = async (value = input): Promise<void> => {
     const message = value.trim()
-    if (!ready || !message || stopping || sending) return
+    if (
+      !ready ||
+      (!message && references.length === 0 && attachments.length === 0) ||
+      stopping ||
+      sending
+    )
+      return
     if (busy && message.startsWith('/')) {
       setError('任务结束后可执行 Slash Command')
       return
     }
     setError(null)
     setSending(true)
-    const result = busy
-      ? await window.desktop.followUp({ message })
-      : await window.desktop.prompt({ message })
+    const promptInput = {
+      message,
+      references,
+      ...(attachments.length ? { images: attachments } : {})
+    }
+    const result =
+      temporarySession && !busy
+        ? await window.desktop.createSession(
+            promptInput,
+            message.split(/\r?\n/u)[0]?.trim() || '图片会话'
+          )
+        : busy
+          ? await window.desktop.followUp(promptInput)
+          : await window.desktop.prompt(promptInput)
     if (result.ok) {
       setProjection((current) => appendUserTurn(current, message))
       onInput('')
+      onSentReferences(references)
+      onReferences([])
+      onAttachments([])
+      if (temporarySession && result.data)
+        onSessionCreated(result.data as RuntimeSnapshot)
     } else setError(result.error.message)
     setSending(false)
   }
@@ -329,6 +301,37 @@ function Conversation({
     const result = await window.desktop.restartRuntime()
     if (result.ok) onSnapshot(result.data)
     else setError(result.error.message)
+  }
+
+  const pasteImages = (
+    event: React.ClipboardEvent<HTMLTextAreaElement>
+  ): void => {
+    const images = [...event.clipboardData.files].filter((file) =>
+      file.type.startsWith('image/')
+    )
+    if (images.length === 0) return
+    event.preventDefault()
+    void Promise.all(
+      images.map(
+        (file) =>
+          new Promise<NonNullable<PromptInput['images']>[number]>(
+            (resolve, reject) => {
+              const reader = new FileReader()
+              reader.onerror = () => reject(reader.error)
+              reader.onload = () => {
+                const value =
+                  typeof reader.result === 'string' ? reader.result : ''
+                resolve({
+                  type: 'image',
+                  data: value.replace(/^data:[^,]*,/u, ''),
+                  mimeType: file.type
+                })
+              }
+              reader.readAsDataURL(file)
+            }
+          )
+      )
+    ).then((loaded) => onAttachments([...attachments, ...loaded]))
   }
 
   const conversation = (
@@ -362,6 +365,10 @@ function Conversation({
               {fixture.assistantMessage}
             </div>
           </div>
+        ) : openingSession ? (
+          <section className="grid h-full place-items-center p-8 text-sm text-[var(--text-muted)]">
+            正在打开会话…
+          </section>
         ) : projection.turns.length > 0 ? (
           <ThreadMessages />
         ) : (
@@ -385,7 +392,7 @@ function Conversation({
       </div>
 
       <div className="shrink-0 p-5 pt-0">
-        <div className="mx-auto max-w-4xl rounded-2xl border border-[var(--border)] bg-white p-3 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+        <div className="relative mx-auto max-w-4xl rounded-2xl border border-[var(--border)] bg-white p-3 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
           <ModelControls
             catalogError={catalogError}
             loginState={loginState}
@@ -397,6 +404,42 @@ function Conversation({
             providers={providers}
             runtime={runtime}
           />
+          {!fixture && (
+            <ContextReferences
+              input={input}
+              onInput={onInput}
+              onReferences={onReferences}
+              references={references}
+              recentReferences={recentReferences}
+              workspaceId={workspaceId}
+            />
+          )}
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 px-2 pb-2">
+              {attachments.map((attachment, index) => (
+                <span
+                  className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--surface-app)] px-1.5 py-1 text-[11px]"
+                  key={`${attachment.mimeType}:${index}`}
+                >
+                  图片 {index + 1}
+                  <button
+                    aria-label={`移除图片 ${index + 1}`}
+                    className="ml-0.5 text-[10px]"
+                    onClick={() =>
+                      onAttachments(
+                        attachments.filter(
+                          (_attachment, itemIndex) => itemIndex !== index
+                        )
+                      )
+                    }
+                    type="button"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
           {fixture ? (
             <textarea
               aria-label="任务输入"
@@ -413,6 +456,7 @@ function Conversation({
                   void send()
                 }
               }}
+              onPaste={pasteImages}
               placeholder={strings.composerPlaceholder}
               value={input}
             />
@@ -432,6 +476,7 @@ function Conversation({
                   void send()
                 }
               }}
+              onPaste={pasteImages}
               placeholder={strings.composerPlaceholder}
               submitMode="none"
               value={input}
@@ -489,7 +534,11 @@ function Conversation({
                 stopping ||
                 sending ||
                 (runtime.status !== 'failed' &&
-                  (!ready || (!busy && input.trim().length === 0)))
+                  (!ready ||
+                    (!busy &&
+                      input.trim().length === 0 &&
+                      references.length === 0 &&
+                      attachments.length === 0)))
               }
             >
               {runtime.status === 'failed' ? (
@@ -528,6 +577,13 @@ export function App(): React.JSX.Element {
     queuedMessageCount: 0
   })
   const [composerInput, setComposerInput] = useState('')
+  const [references, setReferences] = useState<ContextReference[]>([])
+  const [attachments, setAttachments] = useState<
+    NonNullable<PromptInput['images']>
+  >([])
+  const [recentReferences, setRecentReferences] = useState<ContextReference[]>(
+    []
+  )
   const [models, setModels] = useState<AvailableModel[]>([])
   const [providers, setProviders] = useState<LoginProvider[]>([])
   const [modelsLoaded, setModelsLoaded] = useState(false)
@@ -536,33 +592,116 @@ export function App(): React.JSX.Element {
     status: 'idle'
   })
   const [projection, setProjection] = useState(createConversationProjection)
-  const draftKey = useRef<string | null>(null)
+  const [overview, setOverview] = useState<WorkspaceOverview>(
+    fixture
+      ? {
+          activeWorkspaceId: 'fixture-workspace',
+          workspaces: [
+            {
+              id: 'fixture-workspace',
+              path: '/fixture/omp-desktop',
+              name: fixture.workspace,
+              available: true,
+              pinned: false,
+              addedAt: new Date(0).toISOString(),
+              lastUsedAt: new Date(0).toISOString()
+            }
+          ],
+          hasMore: false
+        }
+      : { workspaces: [], hasMore: false }
+  )
+  const [sessions, setSessions] = useState<SessionSummary[]>(
+    fixture
+      ? fixture.conversations.map((title, index) => ({
+          id: `fixture-${index}`,
+          workspaceId: 'fixture-workspace',
+          path: `/fixture/${index}.jsonl`,
+          title,
+          createdAt: new Date(0).toISOString(),
+          modifiedAt: new Date(0).toISOString(),
+          messageCount: 1,
+          size: 1,
+          pinned: false,
+          archived: false,
+          compatibility: 'v3',
+          status: 'complete'
+        }))
+      : []
+  )
+  const [sessionSearch, setSessionSearch] = useState('')
+  const [sessionError, setSessionError] = useState<string | null>(null)
+  const [sessionNextOffset, setSessionNextOffset] = useState(0)
+  const [hasMoreSessions, setHasMoreSessions] = useState(false)
+  const [workspaceOffset, setWorkspaceOffset] = useState(0)
+  const [temporarySession, setTemporarySession] = useState(false)
+  const [archivedExpanded, setArchivedExpanded] = useState(false)
+  const [draftStatus, setDraftStatus] = useState<string | null>(null)
+  const [openingSession, setOpeningSession] = useState(false)
   const projectionSessionId = useRef<string | undefined>(undefined)
+  const projectionRef = useRef(projection)
+  const projectionCache = useRef(new Map<string, ConversationProjection>())
+  const attachmentCache = useRef(
+    new Map<string, NonNullable<PromptInput['images']>>()
+  )
+  const sessionRequestId = useRef(0)
+  const activeWorkspaceId = overview.activeWorkspaceId
+  const currentProjectionKey = runtimeSessionKey(runtime)
+
+  useLayoutEffect(() => {
+    projectionRef.current = projection
+  }, [projection])
 
   const updateComposer = useCallback((value: string): void => {
     setComposerInput(value)
-    if (!draftKey.current) return
-    if (value) localStorage.setItem(draftKey.current, value)
-    else localStorage.removeItem(draftKey.current)
   }, [])
 
   const applySnapshot = useCallback((snapshot: RuntimeSnapshot): void => {
-    if (snapshot.sessionId !== projectionSessionId.current) {
-      projectionSessionId.current = snapshot.sessionId
+    const nextProjectionId = runtimeSessionKey(snapshot)
+    if (nextProjectionId !== projectionSessionId.current) {
+      projectionSessionId.current = nextProjectionId
       setProjection(createConversationProjection())
-    }
-    const nextDraftKey =
-      snapshot.workspacePath && snapshot.sessionId
-        ? `omp-draft:${snapshot.workspacePath}:${snapshot.sessionId}`
-        : null
-    if (nextDraftKey !== draftKey.current) {
-      draftKey.current = nextDraftKey
-      setComposerInput(
-        nextDraftKey ? (localStorage.getItem(nextDraftKey) ?? '') : ''
-      )
     }
     setRuntime(snapshot)
   }, [])
+
+  const refreshWorkspaces = useCallback(async (offset = 0): Promise<void> => {
+    if (fixture) return
+    const result = await window.desktop.getWorkspaces(offset)
+    if (result.ok) {
+      setOverview(result.data)
+      setSessionError(null)
+    } else setSessionError(result.error.message)
+  }, [])
+
+  const refreshSessions = useCallback(
+    async (
+      workspaceId: string,
+      offset = 0,
+      query = '',
+      append = false
+    ): Promise<void> => {
+      if (fixture) return
+      const requestId = ++sessionRequestId.current
+      const result = await window.desktop.listSessions(
+        workspaceId,
+        offset,
+        query
+      )
+      if (requestId !== sessionRequestId.current) return
+      if (!result.ok) {
+        setSessionError(result.error.message)
+        return
+      }
+      setSessions((current) =>
+        append ? [...current, ...result.data.sessions] : result.data.sessions
+      )
+      setSessionNextOffset(result.data.nextOffset)
+      setHasMoreSessions(result.data.hasMore)
+      setSessionError(null)
+    },
+    []
+  )
 
   const refreshModels = useCallback(async (): Promise<boolean> => {
     const result = await window.desktop.getAvailableModels()
@@ -588,6 +727,8 @@ export function App(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
+    cleanExpiredDrafts(localStorage)
+    const workspaceTimer = window.setTimeout(() => void refreshWorkspaces(), 0)
     void window.desktop.getRuntimeState().then((result) => {
       if (result.ok) {
         applySnapshot(result.data)
@@ -600,7 +741,7 @@ export function App(): React.JSX.Element {
         }
       }
     })
-    return window.desktop.onRuntimeEvent((event) => {
+    const unsubscribe = window.desktop.onRuntimeEvent((event) => {
       if (event.type === 'snapshot') applySnapshot(event.snapshot)
       if (event.type === 'provider-login') setLoginState(event.state)
       const handleOmpEvent = (ompEvent: {
@@ -642,22 +783,167 @@ export function App(): React.JSX.Element {
         for (const ompEvent of event.events) handleOmpEvent(ompEvent)
       }
     })
-  }, [applySnapshot, refreshModels, refreshProviders, updateComposer])
+    return () => {
+      window.clearTimeout(workspaceTimer)
+      unsubscribe()
+    }
+  }, [
+    applySnapshot,
+    refreshModels,
+    refreshProviders,
+    refreshWorkspaces,
+    updateComposer
+  ])
 
   useEffect(() => {
-    if (runtime.status !== 'ready' || !runtime.sessionId) return
+    if (!activeWorkspaceId || fixture) return
+    const timer = window.setTimeout(
+      () => {
+        void refreshSessions(activeWorkspaceId, 0, sessionSearch)
+      },
+      sessionSearch ? 180 : 0
+    )
+    return () => window.clearTimeout(timer)
+  }, [activeWorkspaceId, refreshSessions, sessionSearch])
+
+  useEffect(() => {
+    if (temporarySession || !activeWorkspaceId || !runtime.sessionId) return
+    const timer = window.setTimeout(() => {
+      const draft = loadDraft(
+        localStorage,
+        activeWorkspaceId,
+        runtime.sessionId!
+      )
+      setComposerInput(draft?.text ?? '')
+      setReferences(draft?.references ?? [])
+      setDraftStatus(null)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [activeWorkspaceId, runtime.sessionId, temporarySession])
+
+  useEffect(() => {
+    if (temporarySession || !activeWorkspaceId || !runtime.sessionId) return
+    const timer = window.setTimeout(() => {
+      const result = saveDraft(
+        localStorage,
+        activeWorkspaceId,
+        runtime.sessionId!,
+        composerInput,
+        references
+      )
+      setDraftStatus(
+        result.saved
+          ? null
+          : result.reason === 'item-too-large'
+            ? '草稿超过 256 KiB，当前输入尚未保存'
+            : '草稿保存失败，当前输入仍保留'
+      )
+    }, 120)
+    return () => window.clearTimeout(timer)
+  }, [
+    activeWorkspaceId,
+    composerInput,
+    references,
+    runtime.sessionId,
+    temporarySession
+  ])
+
+  useEffect(() => {
+    if (
+      runtime.status !== 'ready' ||
+      !runtime.sessionId ||
+      !currentProjectionKey
+    )
+      return
     let cancelled = false
+    const loadingTimer = window.setTimeout(() => {
+      if (!projectionCache.current.has(currentProjectionKey))
+        setOpeningSession(true)
+    }, 150)
     void window.desktop.getMessages().then((result) => {
-      if (!cancelled && result.ok) setProjection(projectHistory(result.data))
+      if (!cancelled && result.ok) {
+        const restored = projectHistory(result.data)
+        setProjection(restored)
+        projectionCache.current.set(currentProjectionKey, restored)
+        while (projectionCache.current.size > 2) {
+          const oldest = projectionCache.current.keys().next().value as
+            string | undefined
+          if (oldest) projectionCache.current.delete(oldest)
+          else break
+        }
+        setOpeningSession(false)
+      }
     })
     return () => {
       cancelled = true
+      window.clearTimeout(loadingTimer)
     }
-  }, [runtime.sessionId, runtime.status])
+  }, [currentProjectionKey, runtime.sessionId, runtime.status])
 
   const openWorkspace = async (): Promise<void> => {
     const result = await window.desktop.chooseWorkspace()
-    if (result.ok && result.data) applySnapshot(result.data)
+    if (result.ok && result.data) {
+      setTemporarySession(false)
+      applySnapshot(result.data)
+      await refreshWorkspaces()
+    } else if (!result.ok) setSessionError(result.error.message)
+  }
+
+  const activateWorkspace = async (workspaceId: string): Promise<void> => {
+    if (workspaceId === activeWorkspaceId) return
+    const result = await window.desktop.activateWorkspace(workspaceId)
+    if (!result.ok) {
+      setSessionError(result.error.message)
+      return
+    }
+    setTemporarySession(false)
+    setReferences([])
+    setRecentReferences([])
+    setAttachments([])
+    applySnapshot(result.data)
+    await refreshWorkspaces()
+  }
+
+  const switchSession = async (sessionId: string): Promise<void> => {
+    if (!temporarySession && runtime.sessionId === sessionId) return
+    const currentCacheKey = runtimeSessionKey(runtime)
+    if (currentCacheKey)
+      projectionCache.current.set(currentCacheKey, projectionRef.current)
+    if (currentCacheKey)
+      attachmentCache.current.set(currentCacheKey, attachments)
+    const targetCacheKey = runtime.workspacePath
+      ? `${runtime.workspacePath}:${sessionId}`
+      : sessionId
+    const cached = projectionCache.current.get(targetCacheKey)
+    setProjection(cached ?? createConversationProjection())
+    setOpeningSession(false)
+    const loadingTimer = cached
+      ? undefined
+      : window.setTimeout(() => setOpeningSession(true), 150)
+    const result = await window.desktop.switchSession(sessionId)
+    if (loadingTimer) window.clearTimeout(loadingTimer)
+    if (!result.ok) {
+      setOpeningSession(false)
+      setSessionError(result.error.message)
+      return
+    }
+    setTemporarySession(false)
+    setRecentReferences([])
+    setAttachments(attachmentCache.current.get(targetCacheKey) ?? [])
+    applySnapshot(result.data)
+    if (cached) setProjection(cached)
+  }
+
+  const updateSession = async (
+    action: Promise<{ ok: boolean; error?: { message: string } }>
+  ): Promise<void> => {
+    const result = await action
+    if (!result.ok) {
+      setSessionError(result.error?.message ?? '操作失败')
+      return
+    }
+    if (activeWorkspaceId)
+      await refreshSessions(activeWorkspaceId, 0, sessionSearch)
   }
 
   return (
@@ -667,9 +953,155 @@ export function App(): React.JSX.Element {
     >
       <Group className="h-full" id="desktop-layout" orientation="horizontal">
         <Panel defaultSize="18%" id="conversations" minSize={220}>
-          <ConversationSidebar
+          <WorkspaceSidebar
+            archivedExpanded={archivedExpanded}
+            error={sessionError ?? draftStatus}
+            hasMoreSessions={hasMoreSessions}
+            onActivateWorkspace={(id) => void activateWorkspace(id)}
+            onArchiveSession={(id, archived) => {
+              if (!activeWorkspaceId) return
+              void (async () => {
+                if (archived && runtime.sessionId === id) {
+                  const alternative = sessions.find(
+                    (session) =>
+                      session.id !== id &&
+                      !session.archived &&
+                      session.compatibility !== 'corrupt' &&
+                      session.compatibility !== 'future'
+                  )
+                  if (alternative) {
+                    const switched = await window.desktop.switchSession(
+                      alternative.id
+                    )
+                    if (!switched.ok) {
+                      setSessionError(switched.error.message)
+                      return
+                    }
+                    applySnapshot(switched.data)
+                  } else {
+                    const detached = await window.desktop.newSession()
+                    if (!detached.ok) {
+                      setSessionError(detached.error.message)
+                      return
+                    }
+                    applySnapshot(detached.data)
+                    setTemporarySession(true)
+                    setComposerInput('')
+                    setReferences([])
+                    setAttachments([])
+                  }
+                }
+                const key = runtime.workspacePath
+                  ? `${runtime.workspacePath}:${id}`
+                  : id
+                if (archived) projectionCache.current.delete(key)
+                if (archived) attachmentCache.current.delete(key)
+                await updateSession(
+                  window.desktop.setSessionArchived(
+                    activeWorkspaceId,
+                    id,
+                    archived
+                  )
+                )
+              })()
+            }}
+            onArchivedExpanded={setArchivedExpanded}
+            onDeleteSession={(id) => {
+              if (!activeWorkspaceId) return
+              void (async () => {
+                if (runtime.sessionId === id) {
+                  const alternative = sessions.find(
+                    (session) =>
+                      session.id !== id &&
+                      !session.archived &&
+                      session.compatibility !== 'corrupt' &&
+                      session.compatibility !== 'future'
+                  )
+                  const left = alternative
+                    ? await window.desktop.switchSession(alternative.id)
+                    : await window.desktop.newSession()
+                  if (!left.ok) {
+                    setSessionError(left.error.message)
+                    return
+                  }
+                  applySnapshot(left.data)
+                  if (!alternative) {
+                    setTemporarySession(true)
+                    setComposerInput('')
+                    setReferences([])
+                  }
+                }
+                const result = await window.desktop.deleteSession(
+                  activeWorkspaceId,
+                  id
+                )
+                if (!result.ok) {
+                  setSessionError(result.error.message)
+                  return
+                }
+                const key = runtime.workspacePath
+                  ? `${runtime.workspacePath}:${id}`
+                  : id
+                projectionCache.current.delete(key)
+                attachmentCache.current.delete(key)
+                clearDraft(localStorage, activeWorkspaceId, id)
+                await refreshSessions(activeWorkspaceId, 0, sessionSearch)
+              })()
+            }}
+            onLoadMoreSessions={() => {
+              if (activeWorkspaceId)
+                void refreshSessions(
+                  activeWorkspaceId,
+                  sessionNextOffset,
+                  sessionSearch,
+                  true
+                )
+            }}
+            onLoadMoreWorkspaces={() => {
+              const next = workspaceOffset + 50
+              setWorkspaceOffset(next)
+              void refreshWorkspaces(next)
+            }}
+            onNewSession={() => {
+              if (runtime.isStreaming || runtime.queuedMessageCount > 0) {
+                setSessionError('请先 Stop 当前任务')
+                return
+              }
+              setTemporarySession(true)
+              setComposerInput('')
+              setReferences([])
+              setRecentReferences([])
+              setAttachments([])
+              setProjection(createConversationProjection())
+              setSessionError(null)
+            }}
             runtime={runtime}
+            overview={overview}
             onOpenWorkspace={() => void openWorkspace()}
+            onPinSession={(id, pinned) => {
+              if (!activeWorkspaceId) return
+              void updateSession(
+                window.desktop.setSessionPinned(activeWorkspaceId, id, pinned)
+              )
+            }}
+            onPinWorkspace={(id, pinned) => {
+              void window.desktop
+                .setWorkspacePinned(id, pinned)
+                .then((result) => {
+                  if (result.ok) setOverview(result.data)
+                  else setSessionError(result.error.message)
+                })
+            }}
+            onRenameSession={(id, title) => {
+              if (!activeWorkspaceId) return
+              void updateSession(
+                window.desktop.renameSession(activeWorkspaceId, id, title)
+              )
+            }}
+            onSearch={setSessionSearch}
+            onSwitchSession={(id) => void switchSession(id)}
+            search={sessionSearch}
+            sessions={sessions}
           />
         </Panel>
         <Separator className="resize-handle" id="conversations-files" />
@@ -692,6 +1124,33 @@ export function App(): React.JSX.Element {
             modelsLoaded={modelsLoaded}
             onRefreshModels={refreshModels}
             onRefreshProviders={refreshProviders}
+            workspaceId={activeWorkspaceId}
+            references={references}
+            onReferences={setReferences}
+            temporarySession={temporarySession}
+            onSessionCreated={(snapshot) => {
+              setTemporarySession(false)
+              applySnapshot(snapshot)
+              if (activeWorkspaceId)
+                void refreshSessions(activeWorkspaceId, 0, sessionSearch)
+            }}
+            openingSession={openingSession}
+            recentReferences={recentReferences}
+            onSentReferences={(sent) => {
+              setRecentReferences((current) => {
+                const merged = [...current, ...sent]
+                return merged
+                  .filter(
+                    (reference, index) =>
+                      merged.findLastIndex(
+                        (item) => item.id === reference.id
+                      ) === index
+                  )
+                  .slice(-5)
+              })
+            }}
+            attachments={attachments}
+            onAttachments={setAttachments}
           />
         </Panel>
       </Group>

@@ -431,6 +431,58 @@ export class RuntimeSupervisor extends EventEmitter {
     return this.getState()
   }
 
+  trustSession(sessionId: string, sessionPath: string): void {
+    if (!sessionId.trim() || !isAbsolute(sessionPath)) {
+      throw new RuntimeFailure(
+        'INVALID_ARGUMENT',
+        'Session 标识或路径无效',
+        false
+      )
+    }
+    this.#trustedSessions.set(sessionId, sessionPath)
+  }
+
+  async setSessionName(title: string): Promise<void> {
+    const normalized = title
+      .split(/\r?\n/u)[0]
+      ?.split('')
+      .filter((character) => {
+        const code = character.charCodeAt(0)
+        return code >= 32 && code !== 127
+      })
+      .join('')
+      .trim()
+      .slice(0, 160)
+    if (!normalized) {
+      throw new RuntimeFailure(
+        'INVALID_ARGUMENT',
+        'Session 标题不能为空',
+        false
+      )
+    }
+    await this.request(
+      { type: 'set_session_name', name: normalized },
+      MUTATION_TIMEOUT_MS
+    )
+  }
+
+  async setHostUriSchemes(): Promise<void> {
+    await this.request(
+      {
+        type: 'set_host_uri_schemes',
+        schemes: [
+          {
+            scheme: 'omp-session',
+            description: 'OMP Desktop Session 引用',
+            writable: false,
+            immutable: false
+          }
+        ]
+      },
+      STATE_TIMEOUT_MS
+    )
+  }
+
   async restoreSessionPath(sessionPath: string): Promise<RuntimeSnapshot> {
     if (!isAbsolute(sessionPath)) {
       throw new RuntimeFailure(

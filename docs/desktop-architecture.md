@@ -247,9 +247,11 @@ Renderer 将 OMP 实时事件和 Session 历史转换为同一种有序展示投
 - OMP 子进程状态
 - RPC 请求表
 - 当前工作目录
-- 系统级配置
+- 版本化的 `desktop-state.json` 管理配置
 - Terminal 和 Browser 实例
 - 尚未完成的 Extension UI 请求
+
+`desktop-state.json` 位于 Electron `userData` 目录。它只保存 Workspace、Session 管理元数据、Session 级设置和普通 UI 设置，不保存聊天消息。写入使用同目录临时文件、`fsync` 和原子替换，文件权限为 `0600`。旧的 `runtime-state.json` 只在首次迁移时读取。
 
 ### OMP Runtime 持有
 
