@@ -1,10 +1,8 @@
 import { File, Folder, MessagesSquare, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ContextCandidate, ContextReference } from '../shared/desktop-api'
-import {
-  CONTEXT_REFERENCE_MIME,
-  WorkspaceFileTreePortal
-} from './workspace-file-tree'
+import { CONTEXT_REFERENCE_MIME } from './context-drag'
+import { WorkspaceFileTreePortal } from './workspace-file-tree'
 
 function activeMention(input: string): { query: string; start: number } | null {
   const match = /(?:^|\s)@([^\s@]*)$/u.exec(input)
