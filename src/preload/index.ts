@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   DesktopApi,
   ExtensionUiResponse,
@@ -18,6 +18,12 @@ const desktopApi: DesktopApi = {
     ipcRenderer.invoke(IPC_CHANNELS.setWorkspacePinned, workspaceId, pinned),
   removeWorkspace: (workspaceId) =>
     ipcRenderer.invoke(IPC_CHANNELS.removeWorkspace, workspaceId),
+  listWorkspaceEntries: (workspaceId, relativeDirectory) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.listWorkspaceEntries,
+      workspaceId,
+      relativeDirectory
+    ),
   listSessions: (workspaceId, offset, query) =>
     ipcRenderer.invoke(IPC_CHANNELS.listSessions, workspaceId, offset, query),
   setSessionPinned: (workspaceId, sessionId, pinned) =>
@@ -45,6 +51,22 @@ const desktopApi: DesktopApi = {
     ipcRenderer.invoke(IPC_CHANNELS.deleteSession, workspaceId, sessionId),
   getContextCandidates: (workspaceId, query) =>
     ipcRenderer.invoke(IPC_CHANNELS.getContextCandidates, workspaceId, query),
+  resolveDroppedFiles: (workspaceId, files) => {
+    const paths = files.map((file) => {
+      try {
+        return webUtils.getPathForFile(
+          file as Parameters<typeof webUtils.getPathForFile>[0]
+        )
+      } catch {
+        return ''
+      }
+    })
+    return ipcRenderer.invoke(
+      IPC_CHANNELS.resolveDroppedPaths,
+      workspaceId,
+      paths
+    )
+  },
   cancelPendingModelSelection: () =>
     ipcRenderer.invoke(IPC_CHANNELS.cancelPendingModelSelection),
   cancelProviderLogin: () =>
