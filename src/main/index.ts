@@ -13,6 +13,7 @@ import { RuntimeSupervisor } from './runtime-supervisor'
 import { listWorkspaceSessions } from './session-catalog'
 import { installNavigationSecurity, installSessionSecurity } from './security'
 import { configureLinuxFileChooser } from './linux-file-chooser'
+import { registerWorkspaceFilesIpc } from './workspace-files'
 
 const development = Boolean(process.env['ELECTRON_RENDERER_URL'])
 const smokeMode = process.argv.includes('--smoke')
@@ -298,6 +299,11 @@ if (hasSingleInstanceLock) {
     createWindow()
     registerRuntimeIpc(
       runtimeSupervisor,
+      desktopStateStore,
+      () => mainWindow,
+      process.env['ELECTRON_RENDERER_URL']
+    )
+    registerWorkspaceFilesIpc(
       desktopStateStore,
       () => mainWindow,
       process.env['ELECTRON_RENDERER_URL']
