@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { CONTEXT_REFERENCE_MIME } from '../../src/renderer/context-drag'
 import { ContextReferences } from '../../src/renderer/context-references'
-import { CONTEXT_REFERENCE_MIME } from '../../src/renderer/workspace-file-tree'
 
 describe('ContextReferences', () => {
   it('裸 @ 显示单层候选并插入可移除标签', async () => {
