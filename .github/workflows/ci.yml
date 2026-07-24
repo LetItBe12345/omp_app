@@ -41,6 +41,45 @@ jobs:
       - name: Typecheck Node
         run: pnpm typecheck:node
 
+      - name: Typecheck feature source
+        shell: bash
+        run: |
+          cat > .ci-tsconfig.json <<'JSON'
+          {
+            "extends": "./tsconfig.web.json",
+            "include": [
+              "src/renderer/context-references.tsx",
+              "src/renderer/workspace-file-tree.tsx",
+              "src/preload/index.d.ts",
+              "src/shared/**/*.ts"
+            ],
+            "compilerOptions": { "composite": false }
+          }
+          JSON
+          pnpm exec tsc --noEmit -p .ci-tsconfig.json
+          rm .ci-tsconfig.json
+
+      - name: Typecheck feature tests
+        shell: bash
+        run: |
+          cat > .ci-tsconfig.json <<'JSON'
+          {
+            "extends": "./tsconfig.web.json",
+            "include": [
+              "src/renderer/context-references.tsx",
+              "src/renderer/workspace-file-tree.tsx",
+              "src/preload/index.d.ts",
+              "src/shared/**/*.ts",
+              "tests/renderer/setup.ts",
+              "tests/renderer/context-references.test.tsx",
+              "tests/renderer/workspace-file-tree.test.tsx"
+            ],
+            "compilerOptions": { "composite": false }
+          }
+          JSON
+          pnpm exec tsc --noEmit -p .ci-tsconfig.json
+          rm .ci-tsconfig.json
+
       - name: Typecheck Renderer
         run: pnpm typecheck:web
 
