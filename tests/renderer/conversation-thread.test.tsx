@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import { describe, expect, it } from 'vitest'
+import type { ToolApprovalRequest } from '../../src/shared/desktop-api'
 import {
   ConversationRuntime,
   ThreadMessages
@@ -22,9 +23,11 @@ function projectionFrom(
 }
 
 function Harness({
-  initial
+  initial,
+  toolApprovals
 }: {
   initial: ConversationProjection
+  toolApprovals?: ToolApprovalRequest[]
 }): React.JSX.Element {
   const [projection, setProjection] = useState(initial)
   return (
@@ -36,13 +39,69 @@ function Harness({
         projection={projection}
         setProjection={setProjection}
       >
-        <ThreadMessages />
+        <ThreadMessages toolApprovals={toolApprovals} />
       </ConversationRuntime>
     </div>
   )
 }
 
 describe('ConversationThread', () => {
+  it('工具审批使用中文单项和批量操作，默认焦点在允许', async () => {
+    const deadline = Date.now() + 30_000
+    const initial = projectionFrom([{ type: 'agent_start' }])
+    const { rerender } = render(
+      <Harness
+        initial={initial}
+        toolApprovals={[
+          {
+            id: 'approval-1',
+            summary: '命令 · pnpm test',
+            status: 'pending',
+            deadline
+          }
+        ]}
+      />
+    )
+
+    expect(screen.getByText('命令 · pnpm test')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '允许' })).toHaveFocus()
+    fireEvent.click(screen.getByRole('button', { name: '允许' }))
+    expect(window.desktop.respondExtensionUi).toHaveBeenCalledWith(
+      'approval-1',
+      { value: 'Approve' }
+    )
+
+    rerender(
+      <Harness
+        initial={initial}
+        toolApprovals={[
+          {
+            id: 'approval-1',
+            summary: '命令 · pnpm test',
+            status: 'pending',
+            deadline
+          },
+          {
+            id: 'approval-2',
+            summary: '写入 · src/app.ts',
+            status: 'pending',
+            deadline
+          }
+        ]}
+      />
+    )
+    expect(screen.getByText('待确认 2 / 2')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '全部拒绝' }))
+    expect(window.desktop.respondExtensionUi).toHaveBeenCalledWith(
+      'approval-1',
+      { value: 'Deny' }
+    )
+    expect(window.desktop.respondExtensionUi).toHaveBeenCalledWith(
+      'approval-2',
+      { value: 'Deny' }
+    )
+  })
+
   it('完成后只显示单行摘要和最终回答，点击一次展开完整过程', async () => {
     const projection = projectionFrom([
       { type: 'agent_start' },

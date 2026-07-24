@@ -17,6 +17,7 @@ import {
 import { Group, Panel, Separator } from 'react-resizable-panels'
 import { uiFixture } from '../../tests/fixtures/ui-fixture'
 import type {
+  ApprovalMode,
   AvailableModel,
   ContextReference,
   CreatedSession,
@@ -171,6 +172,8 @@ function Conversation({
   references,
   onReferences,
   temporarySession,
+  temporaryApprovalMode,
+  onTemporaryApprovalMode,
   onSessionCreated,
   openingSession,
   recentReferences,
@@ -195,6 +198,8 @@ function Conversation({
   references: ContextReference[]
   onReferences: (references: ContextReference[]) => void
   temporarySession: boolean
+  temporaryApprovalMode: ApprovalMode
+  onTemporaryApprovalMode: (mode: ApprovalMode) => void
   onSessionCreated: (created: CreatedSession) => void
   openingSession: boolean
   recentReferences: ContextReference[]
@@ -280,7 +285,8 @@ function Conversation({
       temporarySession && !busy
         ? await window.desktop.createSession(
             promptInput,
-            message.split(/\r?\n/u)[0]?.trim() || '图片会话'
+            message.split(/\r?\n/u)[0]?.trim() || '图片会话',
+            temporaryApprovalMode
           )
         : busy
           ? await window.desktop.followUp(promptInput)
@@ -369,8 +375,9 @@ function Conversation({
           <section className="grid h-full place-items-center p-8 text-sm text-[var(--text-muted)]">
             正在打开会话…
           </section>
-        ) : projection.turns.length > 0 ? (
-          <ThreadMessages />
+        ) : projection.turns.length > 0 ||
+          (runtime.toolApprovals?.length ?? 0) > 0 ? (
+          <ThreadMessages toolApprovals={runtime.toolApprovals} />
         ) : (
           <section
             className="grid h-full place-items-center p-8 text-center"
@@ -403,6 +410,9 @@ function Conversation({
             onSnapshot={onSnapshot}
             providers={providers}
             runtime={runtime}
+            temporaryApprovalMode={temporaryApprovalMode}
+            temporarySession={temporarySession}
+            onTemporaryApprovalMode={onTemporaryApprovalMode}
           />
           {!fixture && (
             <ContextReferences
@@ -444,7 +454,9 @@ function Conversation({
             <textarea
               aria-label="任务输入"
               className="h-20 w-full resize-none bg-transparent px-2 py-1 text-sm outline-none placeholder:text-[var(--text-muted)] disabled:cursor-not-allowed"
-              disabled={!ready || stopping || sending}
+              disabled={
+                (!ready && !runtime.approvalModeChanging) || stopping || sending
+              }
               onChange={(event) => onInput(event.target.value)}
               onKeyDown={(event) => {
                 if (
@@ -464,7 +476,9 @@ function Conversation({
             <ComposerPrimitive.Input
               aria-label="任务输入"
               className="h-20 w-full resize-none bg-transparent px-2 py-1 text-sm outline-none placeholder:text-[var(--text-muted)] disabled:cursor-not-allowed"
-              disabled={!ready || stopping || sending}
+              disabled={
+                (!ready && !runtime.approvalModeChanging) || stopping || sending
+              }
               onChange={(event) => onInput(event.target.value)}
               onKeyDown={(event) => {
                 if (
@@ -485,6 +499,10 @@ function Conversation({
           <div className="flex items-center justify-between px-1">
             <span className="text-[11px] text-[var(--text-muted)]">
               {error ??
+                (runtime.approvalModeSaved === false
+                  ? '权限保存失败'
+                  : undefined) ??
+                runtime.compatibilityNotice ??
                 (runtime.isAuthenticating
                   ? '正在授权 Provider'
                   : !currentModelAvailable
@@ -574,7 +592,8 @@ export function App(): React.JSX.Element {
   const [runtime, setRuntime] = useState<RuntimeSnapshot>({
     status: 'stopped',
     isStreaming: false,
-    queuedMessageCount: 0
+    queuedMessageCount: 0,
+    approvalMode: 'yolo'
   })
   const [composerInput, setComposerInput] = useState('')
   const [references, setReferences] = useState<ContextReference[]>([])
@@ -635,6 +654,8 @@ export function App(): React.JSX.Element {
   const [hasMoreSessions, setHasMoreSessions] = useState(false)
   const [workspaceOffset, setWorkspaceOffset] = useState(0)
   const [temporarySession, setTemporarySession] = useState(false)
+  const [temporaryApprovalMode, setTemporaryApprovalMode] =
+    useState<ApprovalMode>('yolo')
   const [archivedExpanded, setArchivedExpanded] = useState(false)
   const [draftStatus, setDraftStatus] = useState<string | null>(null)
   const [openingSession, setOpeningSession] = useState(false)
@@ -917,6 +938,10 @@ export function App(): React.JSX.Element {
       if (result.ok && result.data) {
         const { workspace, snapshot } = result.data
         setTemporarySession(false)
+        setTemporaryApprovalMode('yolo')
+        setComposerInput('')
+        setReferences([])
+        setAttachments([])
         setOverview((current) => ({
           ...current,
           activeWorkspaceId: workspace.id,
@@ -941,6 +966,8 @@ export function App(): React.JSX.Element {
       return
     }
     setTemporarySession(false)
+    setTemporaryApprovalMode('yolo')
+    setComposerInput('')
     setReferences([])
     setRecentReferences([])
     setAttachments([])
@@ -973,6 +1000,8 @@ export function App(): React.JSX.Element {
       return
     }
     setTemporarySession(false)
+    setTemporaryApprovalMode('yolo')
+    if (temporarySession) setComposerInput('')
     setRecentReferences([])
     setAttachments(attachmentCache.current.get(targetCacheKey) ?? [])
     applySnapshot(result.data)
@@ -1031,6 +1060,7 @@ export function App(): React.JSX.Element {
                     }
                     applySnapshot(detached.data)
                     setTemporarySession(true)
+                    setTemporaryApprovalMode('yolo')
                     setComposerInput('')
                     setReferences([])
                     setAttachments([])
@@ -1072,6 +1102,7 @@ export function App(): React.JSX.Element {
                   applySnapshot(left.data)
                   if (!alternative) {
                     setTemporarySession(true)
+                    setTemporaryApprovalMode('yolo')
                     setComposerInput('')
                     setReferences([])
                   }
@@ -1113,6 +1144,7 @@ export function App(): React.JSX.Element {
                 return
               }
               setTemporarySession(true)
+              setTemporaryApprovalMode('yolo')
               setComposerInput('')
               setReferences([])
               setRecentReferences([])
@@ -1174,8 +1206,11 @@ export function App(): React.JSX.Element {
             references={references}
             onReferences={setReferences}
             temporarySession={temporarySession}
+            temporaryApprovalMode={temporaryApprovalMode}
+            onTemporaryApprovalMode={setTemporaryApprovalMode}
             onSessionCreated={({ snapshot, session }) => {
               setTemporarySession(false)
+              setTemporaryApprovalMode('yolo')
               applySnapshot(snapshot)
               sessionRequestId.current += 1
               setSessions((current) => [

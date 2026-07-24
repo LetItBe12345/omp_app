@@ -112,6 +112,15 @@ if (typeof window !== 'undefined') {
       setThinkingLevel: vi
         .fn()
         .mockResolvedValue({ ok: true, data: undefined }),
+      setApprovalMode: vi.fn().mockResolvedValue({
+        ok: true,
+        data: {
+          status: 'ready',
+          isStreaming: false,
+          queuedMessageCount: 0,
+          approvalMode: 'write'
+        }
+      }),
       stopCurrentRun: vi.fn().mockResolvedValue({ ok: true, data: null }),
       switchSession: vi.fn(),
       log: vi.fn(),

@@ -79,6 +79,46 @@ function renderControls({
 }
 
 describe('ModelControls', () => {
+  it('显示 Session 权限并立即提交选择', async () => {
+    renderControls({
+      runtimeState: {
+        ...runtime,
+        sessionId: 'session-1',
+        approvalMode: 'always-ask'
+      }
+    })
+
+    const trigger = screen.getByRole('button', { name: '选择权限' })
+    expect(trigger).toHaveTextContent('权限：严格')
+    fireEvent.click(trigger)
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: '标准' }))
+
+    await waitFor(() =>
+      expect(window.desktop.setApprovalMode).toHaveBeenCalledWith('write')
+    )
+  })
+
+  it('未选 Session 时显示禁用的全部允许，重复选择不写配置', async () => {
+    renderControls({ runtimeState: { ...runtime, approvalMode: 'yolo' } })
+    const disabled = screen.getByRole('button', { name: '选择权限' })
+    expect(disabled).toBeDisabled()
+    expect(disabled).toHaveTextContent('权限：全部允许')
+
+    renderControls({
+      runtimeState: {
+        ...runtime,
+        sessionId: 'session-1',
+        approvalMode: 'write'
+      }
+    })
+    const triggers = screen.getAllByRole('button', { name: '选择权限' })
+    fireEvent.click(triggers.at(-1)!)
+    const selected = await screen.findByRole('menuitemradio', { name: '标准' })
+    expect(selected).toHaveFocus()
+    fireEvent.click(selected)
+    expect(window.desktop.setApprovalMode).not.toHaveBeenCalled()
+  })
+
   it('按模型默认档位提交模型和推理强度组合', async () => {
     renderControls()
 

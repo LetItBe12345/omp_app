@@ -397,7 +397,8 @@ describe('App shell', () => {
     await waitFor(() =>
       expect(window.desktop.createSession).toHaveBeenCalledWith(
         { message: '第一条消息', references: [] },
-        '第一条消息'
+        '第一条消息',
+        'yolo'
       )
     )
     expect(await screen.findByText('第一条消息')).toBeInTheDocument()

@@ -33,7 +33,10 @@ import {
   type FormEvent,
   type ReactNode
 } from 'react'
-import type { ExtensionUiResponse } from '../shared/desktop-api'
+import type {
+  ExtensionUiResponse,
+  ToolApprovalRequest
+} from '../shared/desktop-api'
 import {
   actionSummary,
   reduceOmpEvent,
@@ -392,6 +395,16 @@ function Interaction({
   const { setProjection } = useConversationContext()
   const [value, setValue] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [now, setNow] = useState(0)
+  useEffect(() => {
+    if (!interaction.deadline || interaction.timedOut) return
+    const initial = window.setTimeout(() => setNow(Date.now()), 0)
+    const timer = window.setInterval(() => setNow(Date.now()), 250)
+    return () => {
+      window.clearTimeout(initial)
+      window.clearInterval(timer)
+    }
+  }, [interaction.deadline, interaction.timedOut])
   const respond = async (response: ExtensionUiResponse): Promise<void> => {
     if (submitting) return
     setSubmitting(true)
@@ -428,7 +441,17 @@ function Interaction({
       {interaction.message && (
         <p className="interaction-message">{interaction.message}</p>
       )}
-      {interaction.method === 'select' ? (
+      {interaction.timedOut ? (
+        <p className="interaction-message">已超时</p>
+      ) : (
+        interaction.deadline && (
+          <p className="interaction-message">
+            剩余 {Math.max(0, Math.ceil((interaction.deadline - now) / 1_000))}{' '}
+            秒
+          </p>
+        )
+      )}
+      {!interaction.timedOut && interaction.method === 'select' ? (
         <div className="interaction-options">
           {interaction.options.map((option) => (
             <button
@@ -442,7 +465,7 @@ function Interaction({
             </button>
           ))}
         </div>
-      ) : interaction.method === 'confirm' ? (
+      ) : !interaction.timedOut && interaction.method === 'confirm' ? (
         <div className="interaction-options">
           <button
             className="primary-button"
@@ -460,7 +483,7 @@ function Interaction({
             取消
           </button>
         </div>
-      ) : (
+      ) : !interaction.timedOut ? (
         <>
           {interaction.method === 'editor' ? (
             <textarea
@@ -497,7 +520,7 @@ function Interaction({
             </button>
           </div>
         </>
-      )}
+      ) : null}
     </form>
   )
 }
@@ -686,11 +709,13 @@ function formatElapsed(turn: AssistantTurn, now: number): string | undefined {
 function ProcessSummary({
   turn,
   expanded,
-  onToggle
+  onToggle,
+  toolApprovals = []
 }: {
   turn: AssistantTurn
   expanded: boolean
   onToggle: () => void
+  toolApprovals?: ToolApprovalRequest[]
 }): React.JSX.Element {
   const [now, setNow] = useState(() => Date.now())
   const running =
@@ -708,13 +733,29 @@ function ProcessSummary({
       item.kind === 'action' ? [item.toolCallId] : []
     )
   ).size
-  const label = [
-    elapsed ? (running ? `思考中 ${elapsed}` : `思考了 ${elapsed}`) : undefined,
-    toolCount ? `${toolCount} 个工具` : undefined,
-    turnStatusText(turn.status)
-  ]
-    .filter(Boolean)
-    .join(' · ')
+  const pendingApprovals = toolApprovals.filter(
+    (request) => request.status === 'pending'
+  )
+  const approvalDeadline = Math.min(
+    ...pendingApprovals.map((request) => request.deadline)
+  )
+  const label =
+    pendingApprovals.length > 0
+      ? `等待操作 · ${Math.max(
+          0,
+          Math.ceil((approvalDeadline - now) / 1_000)
+        )} 秒后自动允许`
+      : [
+          elapsed
+            ? running
+              ? `思考中 ${elapsed}`
+              : `思考了 ${elapsed}`
+            : undefined,
+          toolCount ? `${toolCount} 个工具` : undefined,
+          turnStatusText(turn.status)
+        ]
+          .filter(Boolean)
+          .join(' · ')
   return (
     <button
       aria-controls={`process-${turn.id}`}
@@ -814,12 +855,34 @@ function ThreadMessage(): React.JSX.Element {
   return role === 'user' ? <UserMessage /> : <AssistantMessage />
 }
 
-function LiveAssistantTurn(): React.JSX.Element | null {
+function LiveAssistantTurn({
+  toolApprovals = []
+}: {
+  toolApprovals?: ToolApprovalRequest[]
+}): React.JSX.Element | null {
   const { projection, setProjection } = useConversationContext()
+  const previousApprovalIds = useRef(new Set<string>())
   const turn = projection.turns.find(
     (item): item is AssistantTurn =>
       item.role === 'assistant' && item.id === projection.activeTurnId
   )
+  useEffect(() => {
+    if (!turn) return undefined
+    const next = new Set(toolApprovals.map((request) => request.id))
+    const hasNew = [...next].some(
+      (requestId) => !previousApprovalIds.current.has(requestId)
+    )
+    previousApprovalIds.current = next
+    if (hasNew) {
+      const timer = window.setTimeout(
+        () =>
+          setProjection((current) => setTurnCollapsed(current, turn.id, false)),
+        0
+      )
+      return () => window.clearTimeout(timer)
+    }
+    return undefined
+  }, [setProjection, toolApprovals, turn])
   if (!turn) return null
   const expanded = !shouldCollapseTurn(turn)
   return (
@@ -836,19 +899,146 @@ function LiveAssistantTurn(): React.JSX.Element | null {
           )
         }
         turn={turn}
+        toolApprovals={toolApprovals}
       />
-      {expanded && <ProcessContents expanded turn={turn} />}
+      {expanded && (
+        <>
+          <ProcessContents expanded turn={turn} />
+          <ToolApprovalPanel requests={toolApprovals} />
+        </>
+      )}
     </div>
   )
 }
 
-const ThreadMessages = memo(function ThreadMessages(): React.JSX.Element {
+const approvalStatusLabel: Record<ToolApprovalRequest['status'], string> = {
+  pending: '待确认',
+  approved: '已允许',
+  'auto-approved': '已自动允许',
+  denied: '已拒绝',
+  cancelled: '已取消',
+  invalid: '请求已失效'
+}
+
+function ToolApprovalPanel({
+  requests
+}: {
+  requests: ToolApprovalRequest[]
+}): React.JSX.Element | null {
+  const [now, setNow] = useState(0)
+  const primaryButton = useRef<HTMLButtonElement | null>(null)
+  const previousCount = useRef(0)
+  const pending = requests.filter((request) => request.status === 'pending')
+  const grouped = requests.length > 1
+  const deadline = Math.min(
+    ...pending.map((request) => request.deadline),
+    Number.POSITIVE_INFINITY
+  )
+  const remaining =
+    now === 0 ? 30 : Math.max(0, Math.ceil((deadline - now) / 1_000))
+
+  useEffect(() => {
+    if (requests.length === 0) return
+    const initial = window.setTimeout(() => setNow(Date.now()), 0)
+    const timer = window.setInterval(() => setNow(Date.now()), 250)
+    return () => {
+      window.clearTimeout(initial)
+      window.clearInterval(timer)
+    }
+  }, [requests.length])
+
+  useEffect(() => {
+    if (previousCount.current === 0 && requests.length > 0)
+      primaryButton.current?.focus()
+    previousCount.current = requests.length
+  }, [requests.length])
+
+  if (requests.length === 0) return null
+
+  const respond = (request: ToolApprovalRequest, value: 'Approve' | 'Deny') =>
+    window.desktop.respondExtensionUi(request.id, { value })
+  const respondAll = (value: 'Approve' | 'Deny'): void => {
+    for (const request of pending) void respond(request, value)
+  }
+
+  return (
+    <section
+      aria-label="工具审批"
+      className="tool-approval-panel"
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape') return
+        event.preventDefault()
+        if (grouped) respondAll('Deny')
+        else if (pending[0]) void respond(pending[0], 'Deny')
+      }}
+    >
+      <div className="tool-approval-heading">
+        <span>
+          {grouped
+            ? `待确认 ${pending.length} / ${requests.length}`
+            : '工具权限确认'}
+        </span>
+        {pending.length > 0 && <span>{remaining} 秒后自动允许</span>}
+      </div>
+      <div className="tool-approval-list">
+        {requests.map((request) => (
+          <div className="tool-approval-row" key={request.id}>
+            <span className="tool-approval-summary" title={request.summary}>
+              {request.summary}
+            </span>
+            {request.status === 'pending' ? (
+              <span className="tool-approval-actions">
+                <button
+                  onClick={() => void respond(request, 'Deny')}
+                  type="button"
+                >
+                  拒绝
+                </button>
+                <button
+                  onClick={() => void respond(request, 'Approve')}
+                  ref={!grouped ? primaryButton : undefined}
+                  type="button"
+                >
+                  允许
+                </button>
+              </span>
+            ) : (
+              <span className="tool-approval-status">
+                {approvalStatusLabel[request.status]}
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+      {grouped && pending.length > 0 && (
+        <div className="tool-approval-batch">
+          <button onClick={() => respondAll('Deny')} type="button">
+            全部拒绝
+          </button>
+          <button
+            onClick={() => respondAll('Approve')}
+            ref={primaryButton}
+            type="button"
+          >
+            全部允许
+          </button>
+        </div>
+      )}
+    </section>
+  )
+}
+
+const ThreadMessages = memo(function ThreadMessages({
+  toolApprovals = []
+}: {
+  toolApprovals?: ToolApprovalRequest[]
+}): React.JSX.Element {
   return (
     <ThreadPrimitive.Root className="conversation-thread">
       <ThreadPrimitive.Viewport className="thread-viewport">
         <div className="thread-content">
           <ThreadPrimitive.Messages components={{ Message: ThreadMessage }} />
-          <LiveAssistantTurn />
+          <LiveAssistantTurn toolApprovals={toolApprovals} />
         </div>
         <ThreadPrimitive.ScrollToBottom
           aria-label="回到对话底部"

@@ -59,8 +59,8 @@ const desktopApi: DesktopApi = {
   loginProvider: (providerId) =>
     ipcRenderer.invoke(IPC_CHANNELS.loginProvider, providerId),
   newSession: () => ipcRenderer.invoke(IPC_CHANNELS.newSession),
-  createSession: (input, title) =>
-    ipcRenderer.invoke(IPC_CHANNELS.createSession, input, title),
+  createSession: (input, title, approvalMode) =>
+    ipcRenderer.invoke(IPC_CHANNELS.createSession, input, title, approvalMode),
   openRuntimeLog: () => ipcRenderer.invoke(IPC_CHANNELS.openRuntimeLog),
   openExternal: (url) =>
     ipcRenderer.invoke(IPC_CHANNELS.openExternal, url) as Promise<boolean>,
@@ -81,6 +81,8 @@ const desktopApi: DesktopApi = {
     ipcRenderer.invoke(IPC_CHANNELS.selectModel, selection),
   setThinkingLevel: (level) =>
     ipcRenderer.invoke(IPC_CHANNELS.setThinkingLevel, level),
+  setApprovalMode: (approvalMode) =>
+    ipcRenderer.invoke(IPC_CHANNELS.setApprovalMode, approvalMode),
   stopCurrentRun: () => ipcRenderer.invoke(IPC_CHANNELS.stopCurrentRun),
   switchSession: (sessionId) =>
     ipcRenderer.invoke(IPC_CHANNELS.switchSession, sessionId),

@@ -9,6 +9,7 @@ import { stat } from 'node:fs/promises'
 import { performance } from 'node:perf_hooks'
 import { dirname, isAbsolute, relative, sep } from 'node:path'
 import type {
+  ApprovalMode,
   DesktopResult,
   ExtensionUiResponse,
   ModelSelection,
@@ -22,6 +23,7 @@ import type {
   WorkspaceSummary
 } from '../shared/desktop-api'
 import { IPC_CHANNELS } from '../shared/desktop-api'
+import { isApprovalMode } from '../shared/approval-mode'
 import type { DesktopStateStore } from './desktop-state'
 import { validateExternalUrl } from './external-url'
 import { redactRuntimeLog } from './runtime-diagnostics'
@@ -35,6 +37,11 @@ import {
   sessionUriPage,
   validateWorkspaceReference
 } from './session-catalog'
+import {
+  approvalTimeoutMs,
+  isToolApprovalRequest,
+  publicToolApproval
+} from './tool-approval'
 
 type WindowGetter = () => BrowserWindow | null
 
@@ -221,6 +228,13 @@ function validateModelSelection(value: unknown): ModelSelection {
   }
 }
 
+function validateApprovalMode(value: unknown): ApprovalMode {
+  if (!isApprovalMode(value)) {
+    throw new RuntimeFailure('INVALID_ARGUMENT', '权限模式无效', false)
+  }
+  return value
+}
+
 export function registerRuntimeIpc(
   supervisor: RuntimeSupervisor,
   stateStore: DesktopStateStore,
@@ -231,6 +245,17 @@ export function registerRuntimeIpc(
     string,
     { event: OmpEvent; timer?: NodeJS.Timeout }
   >()
+  const toolApprovals = new Map<
+    string,
+    {
+      event: OmpEvent
+      request: NonNullable<RuntimeSnapshot['toolApprovals']>[number]
+    }
+  >()
+  const seenToolApprovalIds = new Set<string>()
+  let toolApprovalDeadlineTimer: NodeJS.Timeout | null = null
+  let toolApprovalPublishTimer: NodeJS.Timeout | null = null
+  let compatibilityNoticeShown = false
   let eventBatch: OmpEvent[] = []
   let eventBatchBytes = 0
   let eventBatchTimer: NodeJS.Timeout | null = null
@@ -280,6 +305,7 @@ export function registerRuntimeIpc(
     IPC_CHANNELS.reopenProviderLoginUrl,
     IPC_CHANNELS.selectModel,
     IPC_CHANNELS.setThinkingLevel,
+    IPC_CHANNELS.setApprovalMode,
     IPC_CHANNELS.respondExtensionUi,
     IPC_CHANNELS.revealPath
   ]
@@ -295,6 +321,142 @@ export function registerRuntimeIpc(
     send({ type: 'provider-login', state })
   }
 
+  const publishToolApprovals = (): void => {
+    supervisor.setToolApprovals(
+      [...toolApprovals.values()].map((item) => ({ ...item.request }))
+    )
+  }
+
+  const clearToolApprovalTimers = (): void => {
+    if (toolApprovalDeadlineTimer) clearTimeout(toolApprovalDeadlineTimer)
+    if (toolApprovalPublishTimer) clearTimeout(toolApprovalPublishTimer)
+    toolApprovalDeadlineTimer = null
+    toolApprovalPublishTimer = null
+  }
+
+  const clearToolApprovals = (publish = true): void => {
+    clearToolApprovalTimers()
+    toolApprovals.clear()
+    if (publish) publishToolApprovals()
+  }
+
+  const finishToolApproval = (
+    id: string,
+    value: 'Approve' | 'Deny',
+    status: 'approved' | 'auto-approved' | 'denied'
+  ): boolean => {
+    const pending = toolApprovals.get(id)
+    if (!pending || pending.request.status !== 'pending') return false
+    try {
+      supervisor.sendFrame({
+        type: 'extension_ui_response',
+        id,
+        value
+      })
+    } catch {
+      pending.request.status = 'invalid'
+      publishToolApprovals()
+      if (
+        [...toolApprovals.values()].every(
+          (item) => item.request.status !== 'pending'
+        )
+      )
+        setTimeout(() => clearToolApprovals(), 0)
+      return true
+    }
+    pending.request.status = status
+    supervisor.recordDiagnostic(
+      `工具审批: session=${supervisor.snapshot.sessionId ?? 'unknown'} request=${id} result=${status} elapsedMs=${Math.max(
+        0,
+        Date.now() -
+          (pending.request.deadline - approvalTimeoutMs(pending.event))
+      )}`
+    )
+    publishToolApprovals()
+    if (
+      [...toolApprovals.values()].every(
+        (item) => item.request.status !== 'pending'
+      )
+    ) {
+      setTimeout(() => clearToolApprovals(), 0)
+    }
+    return true
+  }
+
+  const scheduleToolApprovalDeadline = (): void => {
+    if (toolApprovalDeadlineTimer) clearTimeout(toolApprovalDeadlineTimer)
+    const pending = [...toolApprovals.values()].filter(
+      (item) => item.request.status === 'pending'
+    )
+    const deadline = Math.min(...pending.map((item) => item.request.deadline))
+    if (!Number.isFinite(deadline)) {
+      toolApprovalDeadlineTimer = null
+      return
+    }
+    toolApprovalDeadlineTimer = setTimeout(
+      () => {
+        toolApprovalDeadlineTimer = null
+        for (const item of [...toolApprovals.values()]) {
+          if (
+            item.request.status === 'pending' &&
+            item.request.deadline <= Date.now()
+          ) {
+            finishToolApproval(item.request.id, 'Approve', 'auto-approved')
+          }
+        }
+        scheduleToolApprovalDeadline()
+      },
+      Math.max(0, deadline - Date.now())
+    )
+  }
+
+  const registerToolApproval = (event: OmpEvent): void => {
+    const id = String(event['id'])
+    if (seenToolApprovalIds.has(id)) {
+      supervisor.recordDiagnostic(
+        `重复工具审批请求: session=${supervisor.snapshot.sessionId ?? 'unknown'} request=${id}`
+      )
+      return
+    }
+    seenToolApprovalIds.add(id)
+    const workspacePath = supervisor.snapshot.workspacePath
+    if (!workspacePath) return
+    const requestedDeadline = Date.now() + approvalTimeoutMs(event)
+    const activeDeadline = Math.min(
+      requestedDeadline,
+      ...[...toolApprovals.values()]
+        .filter((item) => item.request.status === 'pending')
+        .map((item) => item.request.deadline)
+    )
+    for (const item of toolApprovals.values()) {
+      if (
+        item.request.status === 'pending' &&
+        item.request.deadline > activeDeadline
+      )
+        item.request.deadline = activeDeadline
+    }
+    toolApprovals.set(id, {
+      event,
+      request: publicToolApproval(event, workspacePath, activeDeadline)
+    })
+    scheduleToolApprovalDeadline()
+    if (toolApprovals.size === 1) {
+      toolApprovalPublishTimer = setTimeout(
+        () => {
+          toolApprovalPublishTimer = null
+          publishToolApprovals()
+        },
+        Math.min(100, Math.max(0, activeDeadline - Date.now()))
+      )
+    } else {
+      if (toolApprovalPublishTimer) {
+        clearTimeout(toolApprovalPublishTimer)
+        toolApprovalPublishTimer = null
+      }
+      publishToolApprovals()
+    }
+  }
+
   const onSnapshot = (snapshot: RuntimeSnapshot): void => {
     if (
       activatingWorkspacePath &&
@@ -303,7 +465,13 @@ export function registerRuntimeIpc(
       return
     if (snapshot.status === 'failed' || snapshot.status === 'stopped') {
       clearPendingExtensionUi()
+      clearToolApprovalTimers()
+      toolApprovals.clear()
       hostUriRegistered = false
+    }
+    if (snapshot.status === 'starting') {
+      seenToolApprovalIds.clear()
+      compatibilityNoticeShown = false
     }
     if (snapshot.status === 'ready' && !hostUriRegistered)
       void ensureHostUriRegistered()
@@ -338,7 +506,10 @@ export function registerRuntimeIpc(
     if (
       supervisor.snapshot.isStreaming ||
       supervisor.snapshot.queuedMessageCount > 0 ||
-      pendingExtensionUi.size > 0
+      pendingExtensionUi.size > 0 ||
+      [...toolApprovals.values()].some(
+        (item) => item.request.status === 'pending'
+      )
     ) {
       throw new RuntimeFailure(
         'RUNTIME_NOT_READY',
@@ -464,6 +635,53 @@ export function registerRuntimeIpc(
     return { workspace, session }
   }
 
+  const sessionApprovalMode = async (
+    workspaceId: string,
+    sessionId: string
+  ): Promise<ApprovalMode> => {
+    const stored = stateStore.sessionPreference(
+      workspaceId,
+      sessionId
+    ).approvalMode
+    if (stored) return stored
+    supervisor.recordDiagnostic(
+      `Session 权限缺失或无效，按 yolo 补存: session=${sessionId}`
+    )
+    await stateStore
+      .updateSessionPreference(workspaceId, sessionId, {
+        approvalMode: 'yolo'
+      })
+      .catch((error: unknown) => {
+        log.warn('补存 Session 默认权限失败', error)
+      })
+    return 'yolo'
+  }
+
+  const switchRuntimeSession = async (
+    workspaceId: string,
+    session: Awaited<ReturnType<typeof requireSession>>['session'],
+    approvalMode: ApprovalMode
+  ): Promise<RuntimeSnapshot> => {
+    supervisor.trustSession(session.id, session.path)
+    if (
+      supervisor.snapshot.status !== 'ready' ||
+      supervisor.snapshot.approvalMode !== approvalMode
+    ) {
+      supervisor.setApprovalState(approvalMode, true)
+      await supervisor.restart(approvalMode)
+    }
+    const snapshot =
+      supervisor.snapshot.sessionId === session.id
+        ? supervisor.snapshot
+        : await supervisor.switchSession(session.id)
+    await stateStore.setActiveSession(workspaceId, session.id)
+    return supervisor.setApprovalState(
+      approvalMode,
+      false,
+      snapshot.approvalModeSaved !== false
+    )
+  }
+
   const workspaceSummary = (
     workspaceId: string,
     available = true
@@ -490,20 +708,44 @@ export function registerRuntimeIpc(
       workspacePath: workspace.path,
       isStreaming: false,
       isAuthenticating: false,
-      queuedMessageCount: 0
+      queuedMessageCount: 0,
+      approvalMode: workspace.activeSessionId
+        ? (stateStore.sessionPreference(workspace.id, workspace.activeSessionId)
+            .approvalMode ?? 'yolo')
+        : 'yolo',
+      approvalModeChanging: true
     }
     activatingWorkspacePath = workspace.path
     send({ type: 'snapshot', snapshot: startingSnapshot })
 
     void (async () => {
       try {
+        let activeSession:
+          Awaited<ReturnType<typeof requireSession>>['session'] | undefined
+        let approvalMode: ApprovalMode = 'yolo'
+        if (workspace.activeSessionId) {
+          try {
+            activeSession = (
+              await requireSession(workspace.id, workspace.activeSessionId)
+            ).session
+            approvalMode = await sessionApprovalMode(
+              workspace.id,
+              activeSession.id
+            )
+          } catch (error) {
+            log.warn('读取 Workspace 活动 Session 失败', error)
+          }
+        }
         try {
           if (
             supervisor.snapshot.status === 'ready' &&
-            supervisor.snapshot.workspacePath === workspace.path
+            supervisor.snapshot.workspacePath === workspace.path &&
+            supervisor.snapshot.approvalMode === approvalMode
           )
             await supervisor.getState()
-          else await supervisor.start(workspace.path)
+          else if (approvalMode === 'yolo')
+            await supervisor.start(workspace.path)
+          else await supervisor.start(workspace.path, process.env, approvalMode)
           log.info('performance', {
             event: 'workspace_activation_to_runtime_ready',
             elapsedMs: Math.round(performance.now() - startedAt)
@@ -526,14 +768,10 @@ export function registerRuntimeIpc(
           return
         }
 
-        if (workspace.activeSessionId) {
+        if (activeSession) {
           try {
-            const { session } = await requireSession(
-              workspace.id,
-              workspace.activeSessionId
-            )
-            supervisor.trustSession(session.id, session.path)
-            await supervisor.switchSession(session.id)
+            supervisor.trustSession(activeSession.id, activeSession.path)
+            await supervisor.switchSession(activeSession.id)
           } catch (error) {
             log.warn('恢复 Workspace 的活动 Session 失败', error)
             send({
@@ -683,6 +921,22 @@ export function registerRuntimeIpc(
       }
       deletePendingExtensionUi(id)
     }
+    if (toolApprovals.size > 0) {
+      for (const item of toolApprovals.values()) {
+        if (item.request.status !== 'pending') continue
+        try {
+          supervisor.sendFrame({
+            type: 'extension_ui_response',
+            id: item.request.id,
+            cancelled: true
+          })
+        } catch {
+          // Runtime 已退出时只需清理宿主侧等待项。
+        }
+        item.request.status = 'cancelled'
+      }
+      clearToolApprovals()
+    }
   }
 
   const onOmpEvent = (event: OmpEvent): void => {
@@ -707,6 +961,23 @@ export function registerRuntimeIpc(
       typeof event['id'] === 'string'
     ) {
       const method = event['method']
+      if (isToolApprovalRequest(event, supervisor.snapshot.runtimeVersion)) {
+        registerToolApproval(event)
+        return
+      }
+      if (
+        isToolApprovalRequest(event, '17.0.6') &&
+        supervisor.snapshot.runtimeVersion !== '17.0.6' &&
+        !compatibilityNoticeShown
+      ) {
+        compatibilityNoticeShown = true
+        supervisor.setCompatibilityNotice(
+          '当前 OMP 版本未验证，权限确认使用兼容模式'
+        )
+        supervisor.recordDiagnostic(
+          `工具审批使用兼容模式: version=${supervisor.snapshot.runtimeVersion ?? 'unknown'}`
+        )
+      }
       if (method === 'open_url') {
         const rawUrl =
           typeof event['launchUrl'] === 'string'
@@ -740,6 +1011,20 @@ export function registerRuntimeIpc(
         return
       }
       if (method === 'cancel' && typeof event['targetId'] === 'string') {
+        const pending = toolApprovals.get(event['targetId'])
+        if (pending) {
+          if (pending.request.status === 'pending')
+            pending.request.status = 'cancelled'
+          publishToolApprovals()
+          scheduleToolApprovalDeadline()
+          if (
+            [...toolApprovals.values()].every(
+              (item) => item.request.status !== 'pending'
+            )
+          )
+            setTimeout(() => clearToolApprovals(), 0)
+          return
+        }
         deletePendingExtensionUi(event['targetId'])
       } else if (
         method === 'select' ||
@@ -1082,9 +1367,11 @@ export function registerRuntimeIpc(
             false
           )
         if (supervisor.snapshot.sessionId !== sessionId) {
-          supervisor.trustSession(session.id, session.path)
-          await supervisor.switchSession(session.id)
-          await stateStore.setActiveSession(workspace.id, session.id)
+          await switchRuntimeSession(
+            workspace.id,
+            session,
+            await sessionApprovalMode(workspace.id, session.id)
+          )
         }
         await supervisor.setSessionName(title)
         return success(undefined)
@@ -1412,7 +1699,12 @@ export function registerRuntimeIpc(
 
   ipcMain.handle(
     IPC_CHANNELS.createSession,
-    async (event, value: unknown, titleValue: unknown) => {
+    async (
+      event,
+      value: unknown,
+      titleValue: unknown,
+      approvalModeValue: unknown
+    ) => {
       try {
         assertTrustedSender(event, getWindow, developmentUrl)
         assertSwitchAllowed()
@@ -1421,6 +1713,15 @@ export function registerRuntimeIpc(
         const title =
           typeof titleValue === 'string' ? titleValue.trim() : rawInput.message
         const workspace = activeWorkspace()
+        const approvalMode = validateApprovalMode(approvalModeValue)
+        if (
+          supervisor.snapshot.status !== 'ready' ||
+          supervisor.snapshot.approvalMode !== approvalMode
+        ) {
+          supervisor.setApprovalState(approvalMode, true)
+          await supervisor.restart(approvalMode)
+          supervisor.setApprovalState(approvalMode, false)
+        }
         await supervisor.newSession()
         await supervisor.prompt(input)
         const snapshot = await supervisor.getState()
@@ -1430,11 +1731,18 @@ export function registerRuntimeIpc(
             'OMP 未返回新 Session ID',
             true
           )
-        await stateStore
-          .setActiveSession(workspace.id, snapshot.sessionId)
-          .catch((error: unknown) =>
-            log.warn('保存新 Session 管理状态失败', error)
+        let approvalModeSaved = true
+        try {
+          await stateStore.updateSessionPreference(
+            workspace.id,
+            snapshot.sessionId,
+            { approvalMode }
           )
+          await stateStore.setActiveSession(workspace.id, snapshot.sessionId)
+        } catch {
+          approvalModeSaved = false
+          supervisor.setApprovalState(approvalMode, false, false)
+        }
         await supervisor
           .setSessionName(title || '图片会话')
           .catch((error: unknown) =>
@@ -1445,7 +1753,7 @@ export function registerRuntimeIpc(
           snapshot.sessionId
         )
         return success({
-          snapshot,
+          snapshot: approvalModeSaved ? snapshot : supervisor.snapshot,
           session: stateStore.applyPreferences(workspace.id, session)
         })
       } catch (error) {
@@ -1465,10 +1773,70 @@ export function registerRuntimeIpc(
         assertSwitchAllowed()
         const workspace = activeWorkspace()
         const { session } = await requireSession(workspace.id, sessionId)
-        supervisor.trustSession(session.id, session.path)
-        const snapshot = await supervisor.switchSession(sessionId)
-        await stateStore.setActiveSession(workspace.id, sessionId)
+        const approvalMode = await sessionApprovalMode(workspace.id, session.id)
+        const snapshot = await switchRuntimeSession(
+          workspace.id,
+          session,
+          approvalMode
+        )
         return success(snapshot)
+      } catch (error) {
+        return failure(error)
+      }
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.setApprovalMode,
+    async (event, value: unknown) => {
+      try {
+        assertTrustedSender(event, getWindow, developmentUrl)
+        assertSwitchAllowed()
+        const approvalMode = validateApprovalMode(value)
+        const workspace = activeWorkspace()
+        const sessionId = supervisor.snapshot.sessionId
+        if (!sessionId) {
+          throw new RuntimeFailure(
+            'SESSION_NOT_FOUND',
+            '尚未选择 Session',
+            false
+          )
+        }
+        const { session } = await requireSession(workspace.id, sessionId)
+        const previousMode = await sessionApprovalMode(workspace.id, session.id)
+        if (approvalMode === previousMode) return success(supervisor.snapshot)
+
+        supervisor.setApprovalState(approvalMode, true)
+        try {
+          await supervisor.restart(approvalMode)
+        } catch (error) {
+          try {
+            supervisor.setApprovalState(previousMode, true)
+            await supervisor.restart(previousMode)
+          } catch {
+            throw error
+          }
+          throw new RuntimeFailure(
+            'START_FAILED',
+            `权限切换失败，已恢复为「${
+              previousMode === 'always-ask'
+                ? '严格'
+                : previousMode === 'write'
+                  ? '标准'
+                  : '全部允许'
+            }」`,
+            true
+          )
+        }
+        try {
+          await stateStore.updateSessionPreference(workspace.id, session.id, {
+            approvalMode
+          })
+        } catch {
+          supervisor.setApprovalState(approvalMode, false, false)
+          throw new RuntimeFailure('STATE_WRITE_FAILED', '权限保存失败', true)
+        }
+        return success(supervisor.setApprovalState(approvalMode, false))
       } catch (error) {
         return failure(error)
       }
@@ -1520,6 +1888,28 @@ export function registerRuntimeIpc(
     async (event, id: unknown, response: unknown) => {
       try {
         assertTrustedSender(event, getWindow, developmentUrl)
+        if (
+          typeof id === 'string' &&
+          toolApprovals.has(id) &&
+          isExtensionUiResponse(response) &&
+          'value' in response &&
+          (response.value === 'Approve' || response.value === 'Deny')
+        ) {
+          const handled = finishToolApproval(
+            id,
+            response.value,
+            response.value === 'Approve' ? 'approved' : 'denied'
+          )
+          if (!handled) {
+            throw new RuntimeFailure(
+              'INVALID_ARGUMENT',
+              '工具审批请求已失效',
+              false
+            )
+          }
+          scheduleToolApprovalDeadline()
+          return success(undefined)
+        }
         if (
           typeof id !== 'string' ||
           !pendingExtensionUi.has(id) ||
@@ -1597,6 +1987,8 @@ export function registerRuntimeIpc(
     supervisor.off('event', onOmpEvent)
     supervisor.off('before-stop', cancelPendingExtensionUi)
     clearPendingExtensionUi()
+    clearToolApprovalTimers()
+    toolApprovals.clear()
     for (const toolCallId of pendingToolProgress.keys()) {
       clearToolProgress(toolCallId)
     }

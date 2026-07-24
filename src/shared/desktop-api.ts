@@ -16,6 +16,18 @@ export type PerformanceEntry = {
 export type RuntimeStatus =
   'stopped' | 'starting' | 'ready' | 'stopping' | 'failed'
 
+export type ApprovalMode = 'always-ask' | 'write' | 'yolo'
+
+export type ToolApprovalStatus =
+  'pending' | 'approved' | 'auto-approved' | 'denied' | 'cancelled' | 'invalid'
+
+export type ToolApprovalRequest = {
+  id: string
+  summary: string
+  status: ToolApprovalStatus
+  deadline: number
+}
+
 export type RuntimeErrorCode =
   | 'RUNTIME_NOT_READY'
   | 'OMP_UNCONFIGURED'
@@ -48,6 +60,12 @@ export type RuntimeSnapshot = {
   queuedMessageCount: number
   model?: string
   thinkingLevel?: string
+  approvalMode?: ApprovalMode
+  approvalModeChanging?: boolean
+  approvalModeSaved?: boolean
+  runtimeVersion?: string
+  toolApprovals?: ToolApprovalRequest[]
+  compatibilityNotice?: string
   isAuthenticating?: boolean
   pendingModelSelection?: ModelSelection
   diagnosticSummary?: string[]
@@ -256,9 +274,13 @@ export type DesktopApi = {
   newSession(): Promise<DesktopResult<RuntimeSnapshot>>
   createSession(
     input: PromptInput,
-    title: string
+    title: string,
+    approvalMode: ApprovalMode
   ): Promise<DesktopResult<CreatedSession>>
   switchSession(sessionId: string): Promise<DesktopResult<RuntimeSnapshot>>
+  setApprovalMode(
+    approvalMode: ApprovalMode
+  ): Promise<DesktopResult<RuntimeSnapshot>>
   selectModel(
     selection: ModelSelection
   ): Promise<DesktopResult<RuntimeSnapshot>>
@@ -310,6 +332,7 @@ export const IPC_CHANNELS = {
   reopenProviderLoginUrl: 'runtime:reopen-provider-login-url',
   selectModel: 'runtime:select-model',
   setThinkingLevel: 'runtime:set-thinking-level',
+  setApprovalMode: 'runtime:set-approval-mode',
   stopCurrentRun: 'runtime:stop-current-run',
   switchSession: 'runtime:switch-session'
 } as const

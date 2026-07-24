@@ -65,6 +65,8 @@ export type InteractionItem = {
   options: InteractionOption[]
   actionId?: string
   resolved: boolean
+  deadline?: number
+  timedOut?: boolean
 }
 
 export type ArtifactItem = {
@@ -518,7 +520,10 @@ function addInteraction(
     placeholder: stringValue(event['placeholder']),
     options: interactionOptions(event['options']),
     actionId: candidates.length === 1 ? candidates[0]?.id : undefined,
-    resolved: false
+    resolved: false,
+    ...(typeof event['timeout'] === 'number' && event['timeout'] > 0
+      ? { deadline: now + event['timeout'] }
+      : {})
   }
   turn.items.push(interaction)
   turn.status = 'waiting'
@@ -530,13 +535,20 @@ function addInteraction(
 function resolveInteraction(
   state: ConversationProjection,
   targetId: string,
-  now: number
+  now: number,
+  timedOut = false
 ): void {
   const turn = currentTurn(state, false)
   if (!turn) return
-  turn.items = turn.items.filter(
-    (item) => item.kind !== 'interaction' || item.requestId !== targetId
-  )
+  turn.items = timedOut
+    ? turn.items.map((item) =>
+        item.kind === 'interaction' && item.requestId === targetId
+          ? { ...item, resolved: true, timedOut: true }
+          : item
+      )
+    : turn.items.filter(
+        (item) => item.kind !== 'interaction' || item.requestId !== targetId
+      )
   if (turn.waitingStartedAt !== undefined) {
     turn.waitingDurationMs += Math.max(0, now - turn.waitingStartedAt)
     turn.waitingStartedAt = undefined
@@ -688,7 +700,7 @@ export function reduceOmpEvent(
       break
     case 'extension_ui_resolved':
       if (typeof event['id'] === 'string') {
-        resolveInteraction(state, event['id'], now)
+        resolveInteraction(state, event['id'], now, event['timedOut'] === true)
       }
       break
     case 'auto_retry_start': {

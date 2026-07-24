@@ -61,4 +61,42 @@ describe('DesktopStateStore', () => {
     await expect(store.addWorkspace(workspace)).rejects.toThrow()
     expect(store.state.workspaces).toEqual([])
   })
+
+  it('按 Workspace 和 Session 隔离权限并忽略未知值', async () => {
+    const root = join(
+      tmpdir(),
+      `omp-state-approval-${process.pid}-${Date.now()}`
+    )
+    const firstPath = join(root, 'first')
+    const secondPath = join(root, 'second')
+    await mkdir(firstPath, { recursive: true })
+    await mkdir(secondPath, { recursive: true })
+    const statePath = join(root, 'desktop-state.json')
+    const store = new DesktopStateStore(statePath)
+    await store.load()
+    const first = await store.addWorkspace(firstPath)
+    const second = await store.addWorkspace(secondPath)
+    await store.updateSessionPreference(first.id, 'same-id', {
+      approvalMode: 'always-ask'
+    })
+    await store.updateSessionPreference(second.id, 'same-id', {
+      approvalMode: 'write'
+    })
+
+    expect(store.sessionPreference(first.id, 'same-id').approvalMode).toBe(
+      'always-ask'
+    )
+    expect(store.sessionPreference(second.id, 'same-id').approvalMode).toBe(
+      'write'
+    )
+
+    const raw = JSON.parse(await readFile(statePath, 'utf8'))
+    raw.sessionPreferences[first.id]['invalid'] = { approvalMode: 'unsafe' }
+    await writeFile(statePath, JSON.stringify(raw))
+    const reloaded = new DesktopStateStore(statePath)
+    await reloaded.load()
+    expect(
+      reloaded.sessionPreference(first.id, 'invalid').approvalMode
+    ).toBeUndefined()
+  })
 })
