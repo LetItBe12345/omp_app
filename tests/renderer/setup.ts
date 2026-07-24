@@ -29,6 +29,10 @@ if (typeof window !== 'undefined') {
       activateWorkspace: vi.fn(),
       setWorkspacePinned: vi.fn(),
       removeWorkspace: vi.fn(),
+      listWorkspaceEntries: vi.fn().mockResolvedValue({
+        ok: true,
+        data: { entries: [], truncated: false }
+      }),
       listSessions: vi.fn().mockResolvedValue({
         ok: true,
         data: { sessions: [], hasMore: false, nextOffset: 0 }
@@ -42,6 +46,10 @@ if (typeof window !== 'undefined') {
       renameSession: vi.fn().mockResolvedValue({ ok: true, data: undefined }),
       deleteSession: vi.fn().mockResolvedValue({ ok: true, data: undefined }),
       getContextCandidates: vi.fn().mockResolvedValue({ ok: true, data: [] }),
+      resolveDroppedFiles: vi.fn().mockResolvedValue({
+        ok: true,
+        data: { references: [], rejectedCount: 0 }
+      }),
       cancelPendingModelSelection: vi.fn().mockResolvedValue({
         ok: true,
         data: { status: 'ready', isStreaming: false, queuedMessageCount: 0 }
