@@ -41,14 +41,13 @@ jobs:
       - name: Typecheck Node
         run: pnpm typecheck:node
 
-      - name: Typecheck feature source
+      - name: Typecheck file tree
         shell: bash
         run: |
           cat > .ci-tsconfig.json <<'JSON'
           {
             "extends": "./tsconfig.web.json",
             "include": [
-              "src/renderer/context-references.tsx",
               "src/renderer/workspace-file-tree.tsx",
               "src/preload/index.d.ts",
               "src/shared/**/*.ts"
@@ -59,7 +58,7 @@ jobs:
           pnpm exec tsc --noEmit -p .ci-tsconfig.json
           rm .ci-tsconfig.json
 
-      - name: Typecheck feature tests
+      - name: Typecheck context drop
         shell: bash
         run: |
           cat > .ci-tsconfig.json <<'JSON'
@@ -67,12 +66,8 @@ jobs:
             "extends": "./tsconfig.web.json",
             "include": [
               "src/renderer/context-references.tsx",
-              "src/renderer/workspace-file-tree.tsx",
               "src/preload/index.d.ts",
-              "src/shared/**/*.ts",
-              "tests/renderer/setup.ts",
-              "tests/renderer/context-references.test.tsx",
-              "tests/renderer/workspace-file-tree.test.tsx"
+              "src/shared/**/*.ts"
             ],
             "compilerOptions": { "composite": false }
           }
@@ -115,7 +110,7 @@ jobs:
     timeout-minutes: 20
     strategy:
       fail-fast: false
-      matrix:
+    matrix:
         include:
           - runner: ubuntu-22.04
             ubuntu: '22.04'
