@@ -1,17 +1,6 @@
-import {
-  ipcMain,
-  type BrowserWindow,
-  type IpcMainInvokeEvent
-} from 'electron'
+import { ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import { lstat, opendir, realpath, stat } from 'node:fs/promises'
-import {
-  basename,
-  isAbsolute,
-  join,
-  relative,
-  resolve,
-  sep
-} from 'node:path'
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type {
   ContextReference,
   DesktopResult,

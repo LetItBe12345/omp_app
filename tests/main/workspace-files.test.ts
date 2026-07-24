@@ -34,10 +34,11 @@ function harness(workspacePath: string) {
   return {
     event,
     stateStore,
-    getWindow: () => ({
-      isDestroyed: () => false,
-      webContents
-    }) as never
+    getWindow: () =>
+      ({
+        isDestroyed: () => false,
+        webContents
+      }) as never
   }
 }
 
@@ -48,20 +49,19 @@ describe('registerWorkspaceFilesIpc', () => {
   })
 
   it('按目录懒加载文件树并过滤隐藏和常见构建目录', async () => {
-    const root = join(tmpdir(), `omp-workspace-files-${process.pid}-${Date.now()}`)
+    const root = join(
+      tmpdir(),
+      `omp-workspace-files-${process.pid}-${Date.now()}`
+    )
     await mkdir(join(root, 'src'), { recursive: true })
     await mkdir(join(root, '.git'), { recursive: true })
     await mkdir(join(root, 'node_modules'), { recursive: true })
     await writeFile(join(root, 'README.md'), '# test')
     await writeFile(join(root, 'src', 'index.ts'), 'export {}')
-    const { registerWorkspaceFilesIpc } = await import(
-      '../../src/main/workspace-files'
-    )
+    const { registerWorkspaceFilesIpc } =
+      await import('../../src/main/workspace-files')
     const test = harness(root)
-    const cleanup = registerWorkspaceFilesIpc(
-      test.stateStore,
-      test.getWindow
-    )
+    const cleanup = registerWorkspaceFilesIpc(test.stateStore, test.getWindow)
 
     const rootResult = await electron.handlers.get(
       IPC_CHANNELS.listWorkspaceEntries
@@ -85,14 +85,19 @@ describe('registerWorkspaceFilesIpc', () => {
     expect(childResult).toMatchObject({
       ok: true,
       data: {
-        entries: [expect.objectContaining({ relativePath: join('src', 'index.ts') })]
+        entries: [
+          expect.objectContaining({ relativePath: join('src', 'index.ts') })
+        ]
       }
     })
     cleanup()
   })
 
   it('只把当前 Workspace 内的拖入路径转换为上下文引用', async () => {
-    const root = join(tmpdir(), `omp-workspace-drop-${process.pid}-${Date.now()}`)
+    const root = join(
+      tmpdir(),
+      `omp-workspace-drop-${process.pid}-${Date.now()}`
+    )
     const outside = join(
       tmpdir(),
       `omp-workspace-outside-${process.pid}-${Date.now()}`
@@ -102,9 +107,8 @@ describe('registerWorkspaceFilesIpc', () => {
     await writeFile(join(root, 'README.md'), '# test')
     await writeFile(join(outside, 'secret.txt'), 'secret')
     await symlink(join(outside, 'secret.txt'), join(root, 'outside-link'))
-    const { registerWorkspaceFilesIpc } = await import(
-      '../../src/main/workspace-files'
-    )
+    const { registerWorkspaceFilesIpc } =
+      await import('../../src/main/workspace-files')
     const test = harness(root)
     registerWorkspaceFilesIpc(test.stateStore, test.getWindow)
 

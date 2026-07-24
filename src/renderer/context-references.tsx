@@ -179,22 +179,24 @@ export function ContextReferences({
         }
       }
       if (files.length === 0) return
-      void window.desktop.resolveDroppedFiles(workspaceId, files).then((result) => {
-        if (!result.ok) {
-          setDropError(result.error.message)
-          return
-        }
-        if (result.data.references.length > 0) {
-          onReferences(mergeReferences(references, result.data.references))
-        }
-        setDropError(
-          result.data.rejectedCount > 0
-            ? result.data.references.length > 0
-              ? `已加入 ${result.data.references.length} 项，另有 ${result.data.rejectedCount} 项不在当前 Workspace`
-              : '只能引用当前 Workspace 内的文件或文件夹'
-            : null
-        )
-      })
+      void window.desktop
+        .resolveDroppedFiles(workspaceId, files)
+        .then((result) => {
+          if (!result.ok) {
+            setDropError(result.error.message)
+            return
+          }
+          if (result.data.references.length > 0) {
+            onReferences(mergeReferences(references, result.data.references))
+          }
+          setDropError(
+            result.data.rejectedCount > 0
+              ? result.data.references.length > 0
+                ? `已加入 ${result.data.references.length} 项，另有 ${result.data.rejectedCount} 项不在当前 Workspace`
+                : '只能引用当前 Workspace 内的文件或文件夹'
+              : null
+          )
+        })
     }
     dropTarget.addEventListener('dragenter', onDragEnter)
     dropTarget.addEventListener('dragover', onDragOver)
