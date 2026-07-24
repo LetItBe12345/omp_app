@@ -21,12 +21,14 @@ import { RuntimeSupervisor } from './runtime-supervisor'
 import { listWorkspaceSessions } from './session-catalog'
 import { installNavigationSecurity, installSessionSecurity } from './security'
 import { configureLinuxFileChooser } from './linux-file-chooser'
+import { registerWorkspaceFilesIpc } from './workspace-files'
 
 const development = Boolean(process.env['ELECTRON_RENDERER_URL'])
 const smokeMode = process.argv.includes('--smoke')
 let mainWindow: BrowserWindow | null = null
 let smokeFinishing = false
 let shutdownStarted = false
+let cleanupWorkspaceFiles: (() => void) | undefined
 
 configureLinuxFileChooser(app.commandLine)
 app.setName('OMP Desktop')
@@ -316,6 +318,13 @@ if (hasSingleInstanceLock) {
       () => mainWindow,
       process.env['ELECTRON_RENDERER_URL']
     )
+    cleanupWorkspaceFiles = registerWorkspaceFilesIpc(
+      desktopStateStore,
+      () => mainWindow,
+      process.env['ELECTRON_RENDERER_URL'],
+      undefined,
+      runtimeSupervisor
+    )
     if (!smokeMode) void restoreRuntimeState()
 
     app.on('activate', () => {
@@ -327,6 +336,8 @@ if (hasSingleInstanceLock) {
 app.on('window-all-closed', () => {
   if (shutdownStarted) return
   shutdownStarted = true
+  cleanupWorkspaceFiles?.()
+  cleanupWorkspaceFiles = undefined
   void runtimeSupervisor
     .stop()
     .catch((error: unknown) => log.error('关闭 Runtime 失败', error))

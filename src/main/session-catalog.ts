@@ -1,7 +1,8 @@
 import { homedir, tmpdir } from 'node:os'
-import { lstat, readdir, readFile, realpath, stat } from 'node:fs/promises'
+import { readdir, readFile, realpath, stat } from 'node:fs/promises'
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { ContextCandidate, SessionSummary } from '../shared/desktop-api'
+import { findWorkspaceSearchEntries } from './workspace-files'
 
 type SessionHeader = {
   type: 'session'
@@ -20,18 +21,6 @@ export type ParsedSession = Omit<SessionSummary, 'pinned' | 'archived'> & {
   latestCompaction?: string
   visibleTurns: Array<{ role: 'user' | 'assistant'; text: string }>
 }
-
-const ignoredDirectoryNames = new Set([
-  '.git',
-  'node_modules',
-  'dist',
-  'build',
-  'out',
-  'coverage',
-  'target',
-  '.next',
-  '.cache'
-])
 
 function sessionDirectoryName(cwd: string): string {
   const resolved = resolve(cwd)
@@ -305,64 +294,24 @@ export async function findContextCandidates(
   sessions: ParsedSession[],
   signal?: AbortSignal
 ): Promise<ContextCandidate[]> {
-  const root = await realpath(workspacePath)
   const normalizedQuery = query.trim().toLocaleLowerCase()
-  const files: ContextCandidate[] = []
-  const folders: ContextCandidate[] = []
-  const visit = async (directory: string, depth: number): Promise<void> => {
-    signal?.throwIfAborted()
-    const entries = await readdir(directory, { withFileTypes: true }).catch(
-      () => []
-    )
-    for (const entry of entries) {
-      signal?.throwIfAborted()
-      if (entry.name.startsWith('.')) continue
-      if (ignoredDirectoryNames.has(entry.name)) continue
-      const absolute = join(directory, entry.name)
-      const link = await lstat(absolute).catch(() => null)
-      if (!link) continue
-      let isDirectory = entry.isDirectory()
-      let isFile = entry.isFile()
-      const symbolicLink = link.isSymbolicLink()
-      if (symbolicLink) {
-        const target = await realpath(absolute).catch(() => null)
-        if (!target || !isWithin(root, target)) continue
-        const targetInfo = await stat(target).catch(() => null)
-        if (!targetInfo) continue
-        isDirectory = targetInfo.isDirectory()
-        isFile = targetInfo.isFile()
-      }
-      if (!isDirectory && !isFile) continue
-      const relativePath = relative(root, absolute)
-      const rank = normalizedQuery
-        ? matchRank(entry.name, relativePath, normalizedQuery)
-        : depth === 0
-          ? 0
-          : 99
-      if (rank < 99) {
-        const target = isDirectory ? folders : files
-        const info = isFile ? await stat(absolute).catch(() => null) : null
-        target.push({
-          id: `${isDirectory ? 'folder' : 'file'}:${relativePath}`,
-          kind: isDirectory ? 'folder' : 'file',
-          name: entry.name,
-          detail: relativePath,
-          relativePath,
-          ...(info ? { size: info.size } : {})
-        })
-      }
-      if (normalizedQuery && isDirectory && !symbolicLink)
-        await visit(absolute, depth + 1)
-    }
-  }
-  await visit(root, 0)
-  const sortCandidates = (items: ContextCandidate[]): ContextCandidate[] =>
-    items.sort((a, b) => {
-      const rank =
-        matchRank(a.name, a.detail, normalizedQuery) -
-        matchRank(b.name, b.detail, normalizedQuery)
-      return rank || a.name.localeCompare(b.name, undefined, { numeric: true })
-    })
+  const workspaceEntries = await findWorkspaceSearchEntries(
+    workspacePath,
+    query,
+    signal
+  )
+  const files = workspaceEntries
+    .filter((entry) => entry.kind === 'file')
+    .map((entry): ContextCandidate => ({
+      ...entry,
+      detail: entry.relativePath
+    }))
+  const folders = workspaceEntries
+    .filter((entry) => entry.kind === 'folder')
+    .map((entry): ContextCandidate => ({
+      ...entry,
+      detail: entry.relativePath
+    }))
   const folderLimit = normalizedQuery
     ? 20
     : Math.min(15, 8 + Math.max(0, 7 - files.length))
@@ -386,8 +335,8 @@ export async function findContextCandidates(
       sessionId: session.id
     }))
   return [
-    ...sortCandidates(files).slice(0, fileLimit),
-    ...sortCandidates(folders).slice(0, folderLimit),
+    ...files.slice(0, fileLimit),
+    ...folders.slice(0, folderLimit),
     ...sessionItems
   ]
 }

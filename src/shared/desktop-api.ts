@@ -218,6 +218,66 @@ export type ContextReference = {
   sessionId?: string
 }
 
+export type WorkspaceEntry = {
+  id: string
+  kind: 'file' | 'folder'
+  name: string
+  relativePath: string
+  expandable: boolean
+  symbolicLink: boolean
+  linkStatus?: 'internal' | 'external' | 'broken' | 'cycle'
+}
+
+export type WorkspaceEntryList = {
+  entries: WorkspaceEntry[]
+  total: number
+  offset: number
+  limit: number
+  revision: number
+  workspaceVersion: number
+  hasMore: boolean
+}
+
+export type WorkspaceSearchResult = {
+  entries: WorkspaceEntry[]
+  truncated: boolean
+  workspaceVersion: number
+}
+
+export type WorkspaceWatchState = {
+  workspaceId: string
+  workspaceVersion: number
+  watchedDirectories: number
+  limited: boolean
+}
+
+export type WorkspaceRefreshState = {
+  workspaceVersion: number
+  revisions: Record<string, number>
+}
+
+export type WorkspaceFilesEvent =
+  | {
+      type: 'directory-invalidated'
+      workspaceId: string
+      workspaceVersion: number
+      relativeDirectory: string
+      revision: number
+    }
+  | {
+      type: 'watch-state'
+      workspaceId: string
+      workspaceVersion: number
+      watchedDirectories: number
+      limited: boolean
+      error?: string
+    }
+
+export type DroppedReferenceResult = {
+  references: ContextReference[]
+  rejectedCount: number
+}
+
 export type DraftRecord = {
   text: string
   references: ContextReference[]
@@ -243,6 +303,7 @@ export type DesktopApi = {
   openExternal(url: string): Promise<boolean>
   openRuntimeLog(): Promise<boolean>
   revealPath(path: string): Promise<boolean>
+  validateLocalPath(path: string): Promise<boolean>
   chooseWorkspace(): Promise<DesktopResult<WorkspaceActivation | null>>
   getWorkspaces(offset?: number): Promise<DesktopResult<WorkspaceOverview>>
   activateWorkspace(
@@ -253,6 +314,32 @@ export type DesktopApi = {
     pinned: boolean
   ): Promise<DesktopResult<WorkspaceOverview>>
   removeWorkspace(workspaceId: string): Promise<DesktopResult<void>>
+  listWorkspaceEntries(
+    workspaceId: string,
+    relativeDirectory?: string,
+    offset?: number,
+    revision?: number,
+    priority?: 'interactive' | 'background'
+  ): Promise<DesktopResult<WorkspaceEntryList>>
+  searchWorkspaceEntries(
+    workspaceId: string,
+    query: string
+  ): Promise<DesktopResult<WorkspaceSearchResult>>
+  watchWorkspaceDirectories(
+    workspaceId: string,
+    relativeDirectories: string[]
+  ): Promise<DesktopResult<WorkspaceWatchState>>
+  refreshWorkspaceDirectories(
+    workspaceId: string,
+    relativeDirectories: string[]
+  ): Promise<DesktopResult<WorkspaceRefreshState>>
+  openWorkspaceEntry(
+    workspaceId: string,
+    relativePath: string
+  ): Promise<DesktopResult<boolean>>
+  onWorkspaceFilesEvent(
+    listener: (event: WorkspaceFilesEvent) => void
+  ): Unsubscribe
   listSessions(
     workspaceId: string,
     offset?: number,
@@ -281,6 +368,14 @@ export type DesktopApi = {
     workspaceId: string,
     query: string
   ): Promise<DesktopResult<ContextCandidate[]>>
+  resolveDroppedFiles(
+    workspaceId: string,
+    files: readonly unknown[]
+  ): Promise<DesktopResult<DroppedReferenceResult>>
+  resolveWorkspaceReferences(
+    workspaceId: string,
+    references: ContextReference[]
+  ): Promise<DesktopResult<DroppedReferenceResult>>
   getRuntimeState(): Promise<DesktopResult<RuntimeSnapshot>>
   getMessages(): Promise<DesktopResult<unknown>>
   getAvailableCommands(): Promise<DesktopResult<AvailableSlashCommand[]>>
@@ -326,12 +421,20 @@ export const IPC_CHANNELS = {
   activateWorkspace: 'workspace:activate',
   setWorkspacePinned: 'workspace:set-pinned',
   removeWorkspace: 'workspace:remove',
+  listWorkspaceEntries: 'workspace:entries',
+  searchWorkspaceEntries: 'workspace:search',
+  watchWorkspaceDirectories: 'workspace:watch-directories',
+  refreshWorkspaceDirectories: 'workspace:refresh-directories',
+  openWorkspaceEntry: 'workspace:open-entry',
+  workspaceFilesEvent: 'workspace:files-event',
   listSessions: 'session:list',
   setSessionPinned: 'session:set-pinned',
   setSessionArchived: 'session:set-archived',
   renameSession: 'session:rename',
   deleteSession: 'session:delete',
   getContextCandidates: 'context:candidates',
+  resolveDroppedPaths: 'context:resolve-dropped-paths',
+  resolveWorkspaceReferences: 'context:resolve-workspace-references',
   cancelPendingModelSelection: 'runtime:cancel-pending-model-selection',
   cancelProviderLogin: 'runtime:cancel-provider-login',
   event: 'runtime:event',
@@ -354,6 +457,7 @@ export const IPC_CHANNELS = {
   respondExtensionUi: 'runtime:respond-extension-ui',
   restartRuntime: 'runtime:restart',
   revealPath: 'desktop:reveal-path',
+  validateLocalPath: 'desktop:validate-local-path',
   reopenProviderLoginUrl: 'runtime:reopen-provider-login-url',
   selectModel: 'runtime:select-model',
   setThinkingLevel: 'runtime:set-thinking-level',

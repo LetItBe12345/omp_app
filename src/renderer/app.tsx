@@ -56,6 +56,7 @@ import {
   validateAvailableCommands
 } from './slash-commands'
 import { WorkspaceSidebar } from './workspace-sidebar'
+import { WorkspaceFileTree } from './workspace-file-tree'
 
 const fixture = __OMP_UI_FIXTURE__ ? uiFixture : null
 const runtimeSessionKey = (
@@ -116,10 +117,27 @@ function IconButton({
 }
 
 function FileTree({
-  runtime
+  runtime,
+  workspaceId,
+  onAddReference
 }: {
   runtime: RuntimeSnapshot
+  workspaceId?: string
+  onAddReference: (reference: ContextReference) => Promise<string | undefined>
 }): React.JSX.Element {
+  if (workspaceId && runtime.workspacePath && !fixture) {
+    const workspaceName =
+      runtime.workspacePath.split(/[\\/]/u).filter(Boolean).at(-1) ??
+      runtime.workspacePath
+    return (
+      <WorkspaceFileTree
+        onAddReference={onAddReference}
+        workspaceId={workspaceId}
+        workspaceName={workspaceName}
+        workspacePath={runtime.workspacePath}
+      />
+    )
+  }
   return (
     <aside className="panel-surface h-full min-w-0" data-slot="file-tree">
       <div className="flex h-16 items-center justify-between px-5">
@@ -1547,7 +1565,26 @@ export function App(): React.JSX.Element {
         </Panel>
         <Separator className="resize-handle" id="conversations-files" />
         <Panel defaultSize="17%" id="files" minSize={220}>
-          <FileTree runtime={runtime} />
+          <FileTree
+            onAddReference={async (reference) => {
+              if (!activeWorkspaceId) return '当前 Workspace 不可用'
+              const result = await window.desktop.resolveWorkspaceReferences(
+                activeWorkspaceId,
+                [reference]
+              )
+              if (!result.ok) return result.error.message
+              const resolved = result.data.references[0]
+              if (!resolved) return '文件或目录不可引用'
+              setReferences((current) =>
+                current.some((item) => item.id === resolved.id)
+                  ? current
+                  : [...current, resolved]
+              )
+              return undefined
+            }}
+            runtime={runtime}
+            workspaceId={activeWorkspaceId}
+          />
         </Panel>
         <Separator className="resize-handle" id="files-conversation" />
         <Panel defaultSize="65%" id="conversation" minSize={480}>

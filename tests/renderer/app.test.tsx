@@ -95,7 +95,9 @@ describe('App shell', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '打开 Workspace' }))
 
-    expect(await screen.findByText('new-workspace')).toBeInTheDocument()
+    expect(
+      (await screen.findAllByText('new-workspace')).length
+    ).toBeGreaterThan(0)
     expect(window.desktop.getRuntimeState).toHaveBeenCalledTimes(1)
   })
 

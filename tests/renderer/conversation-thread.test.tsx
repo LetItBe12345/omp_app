@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { ToolApprovalRequest } from '../../src/shared/desktop-api'
 import {
   ConversationRuntime,
@@ -243,6 +243,47 @@ describe('ConversationThread', () => {
     fireEvent.click(await screen.findByText('危险链接'))
     expect(window.desktop.openExternal).not.toHaveBeenCalled()
     expect(screen.getByText('远程图')).toBeInTheDocument()
+  })
+
+  it('HTTP 链接和有效本地路径只在按住修饰键时打开', async () => {
+    vi.mocked(window.desktop.validateLocalPath).mockImplementation(
+      async (value) => value === 'src/main.ts:12:3'
+    )
+    const projection = projectionFrom([
+      {
+        type: 'message_end',
+        message: {
+          id: 'a1',
+          role: 'assistant',
+          stopReason: 'stop',
+          content: [
+            {
+              type: 'text',
+              text: '[文档](https://example.com/docs) `src/main.ts:12:3`\n\n```\nsrc/ignored.ts\n```'
+            }
+          ]
+        }
+      },
+      { type: 'agent_end' }
+    ])
+    render(<Harness initial={projection} />)
+
+    const external = await screen.findByText('文档')
+    fireEvent.click(external)
+    expect(window.desktop.openExternal).not.toHaveBeenCalled()
+    fireEvent.click(external, { ctrlKey: true })
+    expect(window.desktop.openExternal).toHaveBeenCalledWith(
+      'https://example.com/docs'
+    )
+
+    const local = await screen.findByRole('link', {
+      name: 'Ctrl+Enter 打开 src/main.ts:12:3'
+    })
+    fireEvent.click(local)
+    expect(window.desktop.revealPath).not.toHaveBeenCalled()
+    fireEvent.keyDown(local, { key: 'Enter', ctrlKey: true })
+    expect(window.desktop.revealPath).toHaveBeenCalledWith('src/main.ts:12:3')
+    expect(screen.getByText('src/ignored.ts').closest('a')).toBeNull()
   })
 
   it('顶层复制按钮走 Desktop 原生剪贴板 IPC', async () => {

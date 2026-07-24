@@ -24,21 +24,22 @@
 - [x] [MVP-04：流式对话与执行轨迹](../done/04-streaming-conversation-and-run-trace.md)
 - [x] [MVP-05：Workspace、Session 与上下文引用](../done/05-workspace-session-and-context.md)
 - [x] [MVP-06：Session 权限与工具审批](../done/06-session-permissions-and-tool-approvals.md)
-- [ ] [MVP-07：文件树与上下文引用](./07-files-preview-and-edit.md)
-- [ ] [MVP-08：OMP Runtime 环境与网络](./08-runtime-environment-and-network.md)
-- [ ] [MVP-09：Ubuntu 打包与 MVP 验收](./09-ubuntu-packaging-and-acceptance.md)
+- [x] MVP-07：Slash Command 发现、补全与执行
+- [x] [MVP-08：文件树、文件搜索与上下文引用](../done/08-file-tree-and-context-references.md)
+- [ ] [MVP-09：OMP Runtime 环境与网络](./09-runtime-environment-and-network.md)
+- [ ] [MVP-10：Ubuntu 打包与 MVP 验收](./10-ubuntu-packaging-and-acceptance.md)
 
 ## MVP 之后
 
-- [ ] [POST-MVP-01：Changes、Review 与 Diff](./10-changes-review-and-diff.md)
-- [ ] [POST-MVP-02：内置多标签 Terminal](./11-multi-tab-terminal.md)
-- [ ] [POST-MVP-03：多 Session 并行 Runtime](./12-parallel-session-runtimes.md)
+- [ ] [POST-MVP-01：Changes、Review 与 Diff](./11-changes-review-and-diff.md)
+- [ ] [POST-MVP-02：内置多标签 Terminal](./12-multi-tab-terminal.md)
+- [ ] [POST-MVP-03：多 Session 并行 Runtime](./13-parallel-session-runtimes.md)
 
 ## 依赖关系
 
 ```text
 MVP-01 → MVP-02 → MVP-03 → MVP-04 → MVP-05
-  → MVP-06 → MVP-07 → MVP-08 → MVP-09
+  → MVP-06 → MVP-07 → MVP-08 → MVP-09 → MVP-10
 ```
 
 ## MVP 总体验收

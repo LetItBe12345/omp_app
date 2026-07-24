@@ -30,6 +30,37 @@ if (typeof window !== 'undefined') {
       activateWorkspace: vi.fn(),
       setWorkspacePinned: vi.fn(),
       removeWorkspace: vi.fn(),
+      listWorkspaceEntries: vi.fn().mockResolvedValue({
+        ok: true,
+        data: {
+          entries: [],
+          total: 0,
+          offset: 0,
+          limit: 100,
+          revision: 1,
+          workspaceVersion: 1,
+          hasMore: false
+        }
+      }),
+      searchWorkspaceEntries: vi.fn().mockResolvedValue({
+        ok: true,
+        data: { entries: [], truncated: false, workspaceVersion: 1 }
+      }),
+      watchWorkspaceDirectories: vi.fn().mockResolvedValue({
+        ok: true,
+        data: {
+          workspaceId: 'workspace',
+          workspaceVersion: 1,
+          watchedDirectories: 1,
+          limited: false
+        }
+      }),
+      refreshWorkspaceDirectories: vi.fn().mockResolvedValue({
+        ok: true,
+        data: { workspaceVersion: 1, revisions: {} }
+      }),
+      onWorkspaceFilesEvent: vi.fn().mockReturnValue(vi.fn()),
+      openWorkspaceEntry: vi.fn().mockResolvedValue({ ok: true, data: true }),
       listSessions: vi.fn().mockResolvedValue({
         ok: true,
         data: { sessions: [], hasMore: false, nextOffset: 0 }
@@ -43,6 +74,16 @@ if (typeof window !== 'undefined') {
       renameSession: vi.fn().mockResolvedValue({ ok: true, data: undefined }),
       deleteSession: vi.fn().mockResolvedValue({ ok: true, data: undefined }),
       getContextCandidates: vi.fn().mockResolvedValue({ ok: true, data: [] }),
+      resolveDroppedFiles: vi.fn().mockResolvedValue({
+        ok: true,
+        data: { references: [], rejectedCount: 0 }
+      }),
+      resolveWorkspaceReferences: vi
+        .fn()
+        .mockImplementation(async (_workspaceId, references) => ({
+          ok: true,
+          data: { references, rejectedCount: 0 }
+        })),
       cancelPendingModelSelection: vi.fn().mockResolvedValue({
         ok: true,
         data: { status: 'ready', isStreaming: false, queuedMessageCount: 0 }
@@ -107,6 +148,7 @@ if (typeof window !== 'undefined') {
         .fn()
         .mockResolvedValue({ ok: true, data: undefined }),
       revealPath: vi.fn(),
+      validateLocalPath: vi.fn().mockResolvedValue(false),
       selectModel: vi.fn().mockResolvedValue({
         ok: true,
         data: { status: 'ready', isStreaming: false, queuedMessageCount: 0 }

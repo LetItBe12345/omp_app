@@ -6,7 +6,13 @@ import { defineConfig } from 'electron-vite'
 export default defineConfig(({ command }) => ({
   main: {
     build: {
-      sourcemap: command === 'serve'
+      sourcemap: command === 'serve',
+      rollupOptions: {
+        input: {
+          index: resolve('src/main/index.ts'),
+          'workspace-file-worker': resolve('src/main/workspace-file-worker.ts')
+        }
+      }
     }
   },
   preload: {
