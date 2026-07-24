@@ -65,6 +65,11 @@ describe('slash commands', () => {
       query: 'h',
       candidates: [{ name: 'help' }]
     })
+    expect(getSlashMenuModel('/h', 0, commands)).toMatchObject({
+      level: 'command',
+      query: 'h',
+      candidates: [{ name: 'help' }]
+    })
     expect(getSlashMenuModel('/mcp h', 6, commands)).toMatchObject({
       level: 'subcommand',
       query: 'h',

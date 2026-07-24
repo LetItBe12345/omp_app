@@ -1,4 +1,12 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  Menu,
+  shell
+} from 'electron'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { PerformanceEntry, RendererLogEntry } from '../shared/desktop-api'
@@ -106,6 +114,12 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock()
 if (!hasSingleInstanceLock) app.quit()
 
 function registerIpc(): void {
+  ipcMain.handle(IPC_CHANNELS.copyText, async (_event, value: unknown) => {
+    if (typeof value !== 'string') return false
+    clipboard.writeText(value)
+    return true
+  })
+
   ipcMain.handle(IPC_CHANNELS.openExternal, async (_event, value: unknown) => {
     if (typeof value !== 'string') return false
     const url = validateExternalUrl(value)
