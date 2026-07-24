@@ -250,7 +250,7 @@ export class DesktopStateStore {
     const recentBoundary = now - 7 * 24 * 60 * 60 * 1000
     const ordered = [...this.#state.workspaces].sort((a, b) => {
       if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
-      return Date.parse(b.lastUsedAt) - Date.parse(a.lastUsedAt)
+      return Date.parse(b.addedAt) - Date.parse(a.addedAt)
     })
     const initiallyVisible = ordered.filter(
       (item) =>

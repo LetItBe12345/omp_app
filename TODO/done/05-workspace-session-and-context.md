@@ -186,7 +186,7 @@
 - Workspace 使用规范绝对路径匹配，并由 Desktop 生成和保存随机 UUID；目录移动后视为新 Workspace。
 - 一个 Workspace 对应多个 Session；Session 通过 OMP 头部 `cwd` 归属 Workspace。
 - `switch_session` 只切换当前 Workspace 的 Session；跨 Workspace 使用目标 `--cwd` 重启 Runtime。
-- Workspace 按其最新 Session 的 `modifiedAt` 排序，无 Session 时使用加入时间；启动后后台校验。
+- 已置顶 Workspace 在前，置顶组和普通组内部按 `addedAt` 倒序；切换 Workspace 或更新 Session 不改变相对顺序。
 - 所有已添加 Workspace 都保存在磁盘；侧栏先加载当前、置顶和最近 7 天的 Workspace，旧记录通过“更多”每批加载 50 个。
 - 失效 Workspace 保留并标记；手动移除不删除目录和 OMP Session。
 - OMP v17.0.6 没有 Session 列表和删除 RPC；列表只读扫描 OMP 现有 JSONL。

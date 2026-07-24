@@ -99,4 +99,59 @@ describe('DesktopStateStore', () => {
       reloaded.sessionPreference(first.id, 'invalid').approvalMode
     ).toBeUndefined()
   })
+
+  it('Workspace 按创建时间稳定排序，激活后不交换位置', async () => {
+    const root = join(tmpdir(), `omp-state-order-${process.pid}-${Date.now()}`)
+    const statePath = join(root, 'desktop-state.json')
+    await mkdir(root, { recursive: true })
+    await writeFile(
+      statePath,
+      JSON.stringify({
+        version: 1,
+        activeWorkspaceId: 'old',
+        workspaces: [
+          {
+            id: 'old',
+            path: '/workspace/old',
+            addedAt: '2026-01-01T00:00:00.000Z',
+            lastUsedAt: '2026-07-24T12:00:00.000Z',
+            pinned: false
+          },
+          {
+            id: 'new',
+            path: '/workspace/new',
+            addedAt: '2026-03-01T00:00:00.000Z',
+            lastUsedAt: '2026-07-23T12:00:00.000Z',
+            pinned: false
+          },
+          {
+            id: 'pinned',
+            path: '/workspace/pinned',
+            addedAt: '2025-01-01T00:00:00.000Z',
+            lastUsedAt: '2025-01-01T00:00:00.000Z',
+            pinned: true
+          }
+        ],
+        sessionPreferences: {},
+        ui: {}
+      })
+    )
+    const store = new DesktopStateStore(statePath)
+    await store.load()
+    const availability = new Map([
+      ['old', true],
+      ['new', true],
+      ['pinned', true]
+    ])
+    const order = () =>
+      store
+        .overview(availability, 0, Date.parse('2026-07-24T12:00:00.000Z'))
+        .workspaces.map((workspace) => workspace.id)
+
+    expect(order()).toEqual(['pinned', 'new', 'old'])
+    await store.activateWorkspace('new')
+    expect(order()).toEqual(['pinned', 'new', 'old'])
+    await store.activateWorkspace('old')
+    expect(order()).toEqual(['pinned', 'new', 'old'])
+  })
 })
