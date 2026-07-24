@@ -46,6 +46,7 @@ import {
   saveDraft
 } from './draft-store'
 import { WorkspaceSidebar } from './workspace-sidebar'
+import { WorkspaceFileTree } from './workspace-file-tree'
 
 const fixture = __OMP_UI_FIXTURE__ ? uiFixture : null
 const runtimeSessionKey = (
@@ -103,10 +104,15 @@ function IconButton({
 }
 
 function FileTree({
-  runtime
+  runtime,
+  workspaceId
 }: {
   runtime: RuntimeSnapshot
+  workspaceId?: string
 }): React.JSX.Element {
+  if (workspaceId && !fixture) {
+    return <WorkspaceFileTree workspaceId={workspaceId} />
+  }
   return (
     <aside className="panel-surface h-full min-w-0" data-slot="file-tree">
       <div className="flex h-16 items-center justify-between px-5">
@@ -1184,7 +1190,7 @@ export function App(): React.JSX.Element {
         </Panel>
         <Separator className="resize-handle" id="conversations-files" />
         <Panel defaultSize="17%" id="files" minSize={220}>
-          <FileTree runtime={runtime} />
+          <FileTree runtime={runtime} workspaceId={activeWorkspaceId} />
         </Panel>
         <Separator className="resize-handle" id="files-conversation" />
         <Panel defaultSize="65%" id="conversation" minSize={480}>

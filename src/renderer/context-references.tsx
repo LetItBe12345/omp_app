@@ -2,7 +2,6 @@ import { File, Folder, MessagesSquare, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ContextCandidate, ContextReference } from '../shared/desktop-api'
 import { CONTEXT_REFERENCE_MIME } from './context-drag'
-import { WorkspaceFileTreePortal } from './workspace-file-tree'
 
 function activeMention(input: string): { query: string; start: number } | null {
   const match = /(?:^|\s)@([^\s@]*)$/u.exec(input)
@@ -222,7 +221,6 @@ export function ContextReferences({
 
   return (
     <>
-      <WorkspaceFileTreePortal workspaceId={workspaceId} />
       <span aria-hidden="true" className="hidden" ref={dropMarker} />
       {dragActive && (
         <div className="pointer-events-none absolute inset-1 z-30 grid place-items-center rounded-xl border border-dashed border-[var(--text-secondary)] bg-white/95 text-xs font-medium">

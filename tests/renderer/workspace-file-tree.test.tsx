@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { CONTEXT_REFERENCE_MIME } from '../../src/renderer/context-drag'
-import { WorkspaceFileTreePortal } from '../../src/renderer/workspace-file-tree'
+import { WorkspaceFileTree } from '../../src/renderer/workspace-file-tree'
 
 describe('WorkspaceFileTreePortal', () => {
   it('懒加载目录并把节点编码为统一拖拽引用', async () => {
@@ -37,12 +37,7 @@ describe('WorkspaceFileTreePortal', () => {
           truncated: false
         }
       })
-    render(
-      <>
-        <aside data-slot="file-tree" />
-        <WorkspaceFileTreePortal workspaceId="workspace" />
-      </>
-    )
+    render(<WorkspaceFileTree workspaceId="workspace" />)
 
     const folder = await screen.findByRole('button', { name: /src/ })
     fireEvent.click(folder)

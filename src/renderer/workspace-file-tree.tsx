@@ -167,7 +167,10 @@ export function WorkspaceFileTree({
   }, [load])
 
   return (
-    <aside className="panel-surface flex h-full min-w-0 flex-col" data-slot="file-tree">
+    <aside
+      className="panel-surface flex h-full min-w-0 flex-col"
+      data-slot="file-tree"
+    >
       <div className="flex h-16 shrink-0 items-center justify-between px-5">
         <h2 className="text-[15px] font-semibold">文件</h2>
         <button
