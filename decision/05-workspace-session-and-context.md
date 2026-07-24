@@ -38,7 +38,7 @@
 ## `grill-me` 已确认规则
 
 18. 用户首次选择 Workspace 时，Desktop 取得规范绝对路径并生成随机 UUID。同一规范路径再次加入时复用原 UUID；目录移动到新路径后视为新的 Workspace，不自动继承原 Workspace 的管理状态。
-19. 一个 Workspace 对应多个 Session，一个 Session 只归属一个 Workspace。Session 通过 OMP 头部的 `cwd` 归属 Workspace，Session ID 本身不编码 Workspace。Workspace 按其 Session 中最大的 `modifiedAt` 排序；没有 Session 时使用 Workspace 加入时间。Desktop 缓存该值并在启动后后台校验，不阻塞首屏。
+19. 一个 Workspace 对应多个 Session，一个 Session 只归属一个 Workspace。Session 通过 OMP 头部的 `cwd` 归属 Workspace，Session ID 本身不编码 Workspace。已置顶 Workspace 在前，置顶组和普通组内部都按 Workspace 加入 Desktop 的 `addedAt` 倒序。切换、使用或内部 Session 更新只更新状态，不改变 Workspace 的相对顺序。
 20. Desktop 在磁盘中保留所有用户明确添加的 Workspace，不设数量上限。侧栏首次只加载当前 Workspace、已置顶 Workspace和最近 7 天活跃的 Workspace；一周以前的记录通过“更多”按每批 50 个加载。路径失效或无权限时保留并标记“不可用”。手动移除只删除 Desktop 管理数据，不删除目录或 OMP Session。
 21. 随应用分发的 OMP 版本为 17.0.6。该版本 RPC 没有 Session 列表和删除命令。Session 列表的唯一可信来源是 OMP 在 `~/.omp/agent/sessions/<cwd 编码>/` 下保存的 JSONL；Desktop 只读解析现有头部和文件元数据，不建立新的 Session 存储格式。
 22. 删除 Session 时，运行中的 Session 必须先 Stop；删除当前空闲 Session 时先切换或新建另一个 Session。Main 必须校验文件位于当前 Workspace 对应的 OMP Session 目录，并核对头部 Session ID。删除使用系统废纸篓，不直接永久删除，不递归清理共享 Blob。只有放入废纸篓成功后才清理 Desktop 关联状态，失败时全部保留并显示错误。
@@ -47,9 +47,9 @@
 25. 点击“新建 Session”只打开临时输入界面。首条消息发送前不创建 Desktop Session 记录、不加入 Session 列表，也不持久化临时文字、附件或权限。切换 Workspace、切换到其他 Session 或关闭 Desktop 时直接丢弃；再次新建时显示空输入。首次 Prompt 被 OMP 接受并形成真实 Session 后，才按真实 Session ID 保存权限和其他设置。首次发送失败时只在当前界面内保留内容供立即重试。
 26. 临时新会话显示“新会话”。形成真实 Session 后，优先使用 OMP 已有标题；没有标题时，Desktop 清理首条用户消息第一行并通过 `set_session_name` 写回 OMP，不启用额外的模型标题生成。只有图片且没有文字时使用“图片会话”。列表只按宽度省略显示，不保存截断副本；用户手动重命名后不再自动覆盖。
 27. 保留 Session 归档。归档不是删除，只修改 Desktop 元数据并保留 OMP JSONL、权限和正式 Session 草稿；归档区位于当前 Workspace 底部，默认折叠且为空时不显示，可以取消归档。归档时取消置顶，二者不能同时存在。归档当前 Session 前先切换到其他 Session；没有其他 Session 时打开临时新会话。运行、Follow-up 排队或等待 Interaction 时必须先 Stop。删除仍是独立操作。
-28. Workspace 列表不使用日期分组标题：已置顶在前，其余按内部最新 Session 的 `modifiedAt` 倒序。当前 Workspace 内只保留“正在运行”“已置顶”“会话”“已归档”四组；未归档且未置顶的 Session 在“会话”中按 `modifiedAt` 倒序扁平排列，不再拆成“今天、最近 7 天、更早”。旧 Session 每批加载 50 条，空组不显示。同一个 Session 不在多个组重复出现。列表不在 Session 行右侧显示时间，`modifiedAt` 只用于排序。
+28. Workspace 列表不使用日期分组标题：已置顶在前，置顶组和普通组内部按 `addedAt` 倒序，激活 Workspace 或更新 Session 不改变顺序。当前 Workspace 内只保留“正在运行”“已置顶”“会话”“已归档”四组；未归档且未置顶的 Session 在“会话”中按 `modifiedAt` 倒序扁平排列，不再拆成“今天、最近 7 天、更早”。旧 Session 每批加载 50 条，空组不显示。同一个 Session 不在多个组重复出现。列表不在 Session 行右侧显示时间，Session 的 `modifiedAt` 只用于 Session 排序。
 29. Desktop 的 Session 读取器接受无版本号的 v1、v2 和当前 v3。头部 `id`、`cwd` 或时间字段无效时标记为损坏；高于 v3 的版本标记为与当前 OMP 17.0.6 不兼容，二者都不能打开，但仍在列表中显示文件路径和移入废纸篓入口。使用一个最小通用头部读取器和按版本分支的简单适配器，未知条目类型只在元数据读取时忽略。升级 OMP 时必须加入对应版本的真实 JSONL fixture、兼容表和测试，不跨 OMP 版本自行迁移 Session。
-30. Workspace 和 Session 都通过右键菜单置顶。未置顶项只显示“置顶”，已置顶项只显示“取消置顶”；键盘的菜单键或 `Shift+F10` 打开同一菜单，不长期显示额外的省略号按钮。操作后立即关闭菜单并重排，写入失败时恢复原顺序并显示错误。已置顶项显示小型置顶图标；置顶区内部仍按 `modifiedAt` 倒序。
+30. Workspace 和 Session 都通过右键菜单置顶。未置顶项只显示“置顶”，已置顶项只显示“取消置顶”；键盘的菜单键或 `Shift+F10` 打开同一菜单，不长期显示额外的省略号按钮。操作后立即关闭菜单并重排，写入失败时恢复原顺序并显示错误。已置顶项显示小型置顶图标；置顶 Workspace 内部按 `addedAt` 倒序，置顶 Session 内部按 `modifiedAt` 倒序。
 31. `@` 候选使用一个可滚动的单层菜单，只按文件、文件夹和 Session 分块，不进入二级菜单。裸 `@` 显示当前已加载消息中最近引用且仍有效的 5 个文件或文件夹、Workspace 根目录最多 15 项，以及当前 Workspace 最近使用的 5 个非当前、非归档 Session。最近引用按出现时间倒序并按规范路径去重，不额外扫描完整 Session，也不持久化引用历史。根目录只读一层，过滤隐藏项、忽略目录和不可读项；文件夹最多 8 个、文件最多 7 个，一类不足时名额转给另一类，类内按自然名称排序。
 32. 用户输入查询后，只按需搜索当前 Workspace，不建立常驻的全量文件索引。文件名、文件夹名、路径片段和 Session 标题使用不区分大小写的包含匹配；完全匹配、名称前缀、路径片段前缀、普通包含依次排序，不做拼音或字符跳跃式模糊匹配。文件、文件夹和 Session 每类最多 20 个；文件和文件夹同级时按自然名称排序，Session 同级时按 `modifiedAt` 倒序。关闭菜单时取消未完成搜索并释放本次结果。
 33. `@file` 和 `@folder` 的选择结果在 Renderer 中显示为引用标签，发送时转换为 OMP 可识别的 Workspace 相对路径，含空格的路径使用引号；Desktop 不读取或复制正文。候选不按扩展名过滤。PDF、DOCX、PPTX、XLSX、EPUB 和图片使用 OMP 现有读取能力；音频、视频及其他二进制文件允许引用，但不承诺可以直接理解。MVP 不增加 Desktop 文档解析器、音视频转码流程或语音识别服务。

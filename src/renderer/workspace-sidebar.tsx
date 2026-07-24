@@ -111,7 +111,7 @@ export function WorkspaceSidebar({
       onClick={() => setMenu(null)}
     >
       <div className="flex h-16 items-center justify-between px-5">
-        <h1 className="text-[15px] font-semibold">对话</h1>
+        <h1 className="text-[15px] font-semibold">新建对话</h1>
         <button
           aria-label="新建对话"
           className="inline-grid size-8 place-items-center rounded-lg"
