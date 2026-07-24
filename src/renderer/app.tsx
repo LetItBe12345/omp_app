@@ -646,6 +646,7 @@ export function App(): React.JSX.Element {
     new Map<string, NonNullable<PromptInput['images']>>()
   )
   const sessionRequestId = useRef(0)
+  const runtimeReadyRef = useRef(false)
   const activeWorkspaceId = overview.activeWorkspaceId
   const activeWorkspaceIdRef = useRef(activeWorkspaceId)
   const sessionSearchRef = useRef(sessionSearch)
@@ -734,23 +735,37 @@ export function App(): React.JSX.Element {
     return true
   }, [])
 
+  const refreshCatalogWhenReady = useCallback(
+    (snapshot: RuntimeSnapshot): void => {
+      if (snapshot.status !== 'ready') {
+        runtimeReadyRef.current = false
+        return
+      }
+      if (runtimeReadyRef.current) return
+      runtimeReadyRef.current = true
+      void refreshModels()
+      void refreshProviders()
+      void window.desktop.getProviderLoginState().then((result) => {
+        if (result.ok) setLoginState(result.data)
+      })
+    },
+    [refreshModels, refreshProviders]
+  )
+
   useEffect(() => {
     cleanExpiredDrafts(localStorage)
     const workspaceTimer = window.setTimeout(() => void refreshWorkspaces(), 0)
     void window.desktop.getRuntimeState().then((result) => {
       if (result.ok) {
         applySnapshot(result.data)
-        if (result.data.status === 'ready') {
-          void refreshModels()
-          void refreshProviders()
-          void window.desktop.getProviderLoginState().then((loginResult) => {
-            if (loginResult.ok) setLoginState(loginResult.data)
-          })
-        }
+        refreshCatalogWhenReady(result.data)
       }
     })
     const unsubscribe = window.desktop.onRuntimeEvent((event) => {
-      if (event.type === 'snapshot') applySnapshot(event.snapshot)
+      if (event.type === 'snapshot') {
+        applySnapshot(event.snapshot)
+        refreshCatalogWhenReady(event.snapshot)
+      }
       if (event.type === 'workspace-activation-failed')
         setSessionError(event.error.message)
       if (event.type === 'provider-login') setLoginState(event.state)
@@ -803,8 +818,7 @@ export function App(): React.JSX.Element {
     }
   }, [
     applySnapshot,
-    refreshModels,
-    refreshProviders,
+    refreshCatalogWhenReady,
     refreshSessions,
     refreshWorkspaces,
     updateComposer

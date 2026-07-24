@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { App } from '../../src/renderer/app'
 
@@ -97,6 +97,72 @@ describe('App shell', () => {
 
     expect(await screen.findByText('new-workspace')).toBeInTheDocument()
     expect(window.desktop.getRuntimeState).toHaveBeenCalledTimes(1)
+  })
+
+  it('Runtime 后台启动 ready 后刷新 Provider、模型和思考强度', async () => {
+    let runtimeListener:
+      Parameters<typeof window.desktop.onRuntimeEvent>[0] | undefined
+    vi.mocked(window.desktop.onRuntimeEvent).mockImplementationOnce(
+      (listener) => {
+        runtimeListener = listener
+        return vi.fn()
+      }
+    )
+    vi.mocked(window.desktop.getAvailableModels).mockResolvedValueOnce({
+      ok: true,
+      data: [
+        {
+          provider: 'openai-codex',
+          id: 'gpt-5.4-mini',
+          name: 'GPT-5.4-Mini',
+          reasoning: true,
+          thinking: {
+            efforts: ['low', 'medium', 'high', 'xhigh'],
+            defaultLevel: 'medium'
+          }
+        }
+      ]
+    })
+    vi.mocked(window.desktop.getLoginProviders).mockResolvedValueOnce({
+      ok: true,
+      data: [
+        {
+          id: 'openai-codex',
+          name: 'ChatGPT Plus/Pro',
+          available: true,
+          authenticated: true
+        }
+      ]
+    })
+    render(<App />)
+
+    await waitFor(() => expect(runtimeListener).toBeDefined())
+    act(() => {
+      runtimeListener?.({
+        type: 'snapshot',
+        snapshot: {
+          status: 'ready',
+          workspacePath: '/tmp/workspace',
+          model: 'openai-codex/gpt-5.4-mini',
+          thinkingLevel: 'high',
+          isStreaming: false,
+          queuedMessageCount: 0
+        }
+      })
+    })
+
+    await waitFor(() =>
+      expect(window.desktop.getAvailableModels).toHaveBeenCalledTimes(1)
+    )
+    expect(window.desktop.getLoginProviders).toHaveBeenCalledTimes(1)
+    expect(window.desktop.getProviderLoginState).toHaveBeenCalledTimes(1)
+    expect(
+      await screen.findByRole('button', { name: '选择模型' })
+    ).toHaveTextContent('GPT-5.4-Mini')
+    expect(
+      screen.getByRole('button', { name: '选择推理强度' })
+    ).toHaveTextContent('高')
+    expect(screen.getByRole('button', { name: '选择推理强度' })).toBeEnabled()
   })
 
   it('运行中使用 Stop 按钮和 Ctrl+C 停止同一任务', async () => {
