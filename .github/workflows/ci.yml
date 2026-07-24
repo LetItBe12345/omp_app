@@ -78,7 +78,16 @@ jobs:
       - name: Typecheck Renderer
         run: pnpm typecheck:web
 
-      - name: Lint
+      - name: Lint file tree
+        run: pnpm exec eslint src/renderer/context-drag.ts src/renderer/workspace-file-tree.tsx
+
+      - name: Lint context drop
+        run: pnpm exec eslint src/renderer/context-references.tsx
+
+      - name: Lint remaining changes
+        run: pnpm exec eslint src/main/index.ts src/main/workspace-files.ts src/preload/index.ts src/shared/desktop-api.ts tests/main/workspace-files.test.ts tests/renderer/setup.ts tests/renderer/context-references.test.tsx tests/renderer/workspace-file-tree.test.tsx
+
+      - name: Lint all
         run: pnpm lint
 
       - name: Check formatting
