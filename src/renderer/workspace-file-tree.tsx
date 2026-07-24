@@ -8,8 +8,7 @@ import {
 import { useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { ContextReference, WorkspaceEntry } from '../shared/desktop-api'
-
-export const CONTEXT_REFERENCE_MIME = 'application/x-omp-context-reference'
+import { CONTEXT_REFERENCE_MIME } from './context-drag'
 
 function referenceFromEntry(entry: WorkspaceEntry): ContextReference {
   return {
@@ -159,7 +158,13 @@ function WorkspaceFileTree({
   }, [workspaceId])
 
   useEffect(() => {
-    void load()
+    let cancelled = false
+    queueMicrotask(() => {
+      if (!cancelled) void load()
+    })
+    return () => {
+      cancelled = true
+    }
   }, [load])
 
   return (
@@ -213,13 +218,13 @@ function WorkspaceFileTree({
 }
 
 function useFileTreeTarget(): HTMLElement | null {
-  const [target, setTarget] = useState<HTMLElement | null>(null)
+  const [target, setTarget] = useState<HTMLElement | null>(() =>
+    document.querySelector<HTMLElement>('[data-slot="file-tree"]')
+  )
   useEffect(() => {
-    const find = (): void => {
+    const observer = new MutationObserver(() => {
       setTarget(document.querySelector<HTMLElement>('[data-slot="file-tree"]'))
-    }
-    find()
-    const observer = new MutationObserver(find)
+    })
     observer.observe(document.body, { childList: true, subtree: true })
     return () => observer.disconnect()
   }, [])
