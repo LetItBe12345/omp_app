@@ -6,7 +6,6 @@ import {
   RefreshCw
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
-import { createPortal } from 'react-dom'
 import type { ContextReference, WorkspaceEntry } from '../shared/desktop-api'
 import { CONTEXT_REFERENCE_MIME } from './context-drag'
 
@@ -132,7 +131,7 @@ function WorkspaceTreeNode({
   )
 }
 
-function WorkspaceFileTree({
+export function WorkspaceFileTree({
   workspaceId
 }: {
   workspaceId: string
@@ -168,10 +167,7 @@ function WorkspaceFileTree({
   }, [load])
 
   return (
-    <div
-      className="absolute inset-0 z-10 flex flex-col bg-[var(--surface-app)]"
-      data-slot="workspace-file-tree"
-    >
+    <aside className="panel-surface flex h-full min-w-0 flex-col" data-slot="file-tree">
       <div className="flex h-16 shrink-0 items-center justify-between px-5">
         <h2 className="text-[15px] font-semibold">文件</h2>
         <button
@@ -213,43 +209,6 @@ function WorkspaceFileTree({
           </p>
         )}
       </div>
-    </div>
-  )
-}
-
-function useFileTreeTarget(): HTMLElement | null {
-  const [target, setTarget] = useState<HTMLElement | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    queueMicrotask(() => {
-      if (!cancelled) {
-        setTarget(
-          document.querySelector<HTMLElement>('[data-slot="file-tree"]')
-        )
-      }
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-  return target
-}
-
-export function WorkspaceFileTreePortal({
-  workspaceId
-}: {
-  workspaceId?: string
-}): React.JSX.Element | null {
-  const target = useFileTreeTarget()
-  if (!workspaceId || !target) return null
-  return createPortal(
-    <>
-      <style>{`
-        [data-slot='file-tree'] { position: relative; }
-        [data-slot='file-tree'] > :not([data-slot='workspace-file-tree']) { display: none; }
-      `}</style>
-      <WorkspaceFileTree workspaceId={workspaceId} />
-    </>,
-    target
+    </aside>
   )
 }
