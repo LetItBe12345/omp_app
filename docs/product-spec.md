@@ -52,10 +52,14 @@ Workspace 内部只保留四组：
 
 1. 正在运行
 2. 已置顶
-3. 最近
+3. 会话
 4. 已归档
 
-“最近”按今天、最近 7 天、更早分段。
+“会话”包含未置顶且未归档的 Session，按最后修改时间倒序扁平排列，不再按今天、最近 7 天和更早分段。旧 Session 按每批 50 条继续加载。Session 行不显示时间，最后修改时间只用于排序。
+
+Workspace 列表同样不使用日期分组标题。已置顶 Workspace 在前，其余按内部最新 Session 的最后修改时间倒序。首次显示当前、已置顶和最近 7 天活跃的 Workspace；更早记录通过“更多”按每批 50 个加载。
+
+“已归档”默认折叠且为空时不显示。归档不是删除，可以在应用内恢复；删除是独立操作。
 
 MVP 不做复杂文件夹和多层标签系统。
 
@@ -68,7 +72,7 @@ MVP 不做复杂文件夹和多层标签系统。
 - 置顶和归档。
 - 保存、搜索和切换多个会话。
 
-MVP 只有一个长期运行的 OMP Runtime。同一时间只有当前 Session 可以生成，切换 Session 后再继续交互。
+MVP 的一个活动 Workspace 只有一个长期运行的 OMP Runtime。同一时间只有当前 Session 可以生成。同一 Workspace 内通过 `new_session` 或 `switch_session` 顺序切换；权限变化时保持 Workspace 的 `cwd` 重启 Runtime。跨 Workspace 必须使用目标 Workspace 的 `--cwd` 启动新 Runtime。
 
 多 Session 并行属于 MVP 之后的能力。届时一个正在生成的 Session 对应一个 OMP Runtime，并由 Settings 限制最大并行数量；闲置 Session 不长期占用进程。
 
@@ -82,9 +86,15 @@ MVP 只有一个长期运行的 OMP Runtime。同一时间只有当前 Session �
 
 `@diff` 随后续 Changes / Review / Diff 能力实现。
 
-`@session` 默认引用会话摘要和关键消息。
+候选使用一个可滚动的单层菜单，只搜索当前 Workspace。裸 `@` 显示少量最近引用、Workspace 根目录项和最近 Session；输入查询后按需搜索，不建立常驻全量文件索引。
+
+`@file` 和 `@folder` 只把 Workspace 相对路径交给 OMP，由 OMP 的现有工具按文件类型读取。Desktop 不复制文件正文，也不增加文档或音视频解析依赖。
+
+`@session` 使用只读 Host URI。模型需要时读取最新压缩摘要、首条用户消息和最近可见对话；更早内容分页取得。
 
 不要直接把完整历史全部塞入上下文。
+
+正式 Session 的未发送草稿保存文字和 `@` 引用描述，不复制引用内容。单项最多 256 KiB，全部草稿合计最多 2 MiB，最后编辑超过 30 天后清理。Workspace 内图片通过 `@file` 保存路径；粘贴或直接添加的图片附件只在当前 Desktop 运行期间保留，不跨重启恢复。
 
 ## 5. 对话与流式输出
 
@@ -162,7 +172,9 @@ OMP RPC Process
 - Login。
 - Abort。
 
-MVP 不注册 Host Tools 或 Host URI。普通 Renderer 也不直接调用 RPC `bash`；Agent 自己的 Bash Tool 仍由 OMP Runtime 执行。
+MVP 不注册 Host Tools。普通 Renderer 也不直接调用 RPC `bash`；Agent 自己的 Bash Tool 仍由 OMP Runtime 执行。
+
+MVP 只注册一个只读 Host URI：`omp-session://<workspace-id>/<session-id>`。它用于 `@session`，由 Main 核对当前 Workspace、Session JSONL 头部和实际路径后分页返回可见对话。其他 Host URI 请求明确返回“不支持”。
 
 MVP 的单个 OMP Runtime 只能持有一个当前 AgentSession。Desktop 可管理多个 Session，但同一时间只允许当前 Session 生成。
 

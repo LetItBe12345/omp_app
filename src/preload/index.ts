@@ -10,6 +10,41 @@ import { IPC_CHANNELS } from '../shared/desktop-api'
 
 const desktopApi: DesktopApi = {
   chooseWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.chooseWorkspace),
+  getWorkspaces: (offset) =>
+    ipcRenderer.invoke(IPC_CHANNELS.getWorkspaces, offset),
+  activateWorkspace: (workspaceId) =>
+    ipcRenderer.invoke(IPC_CHANNELS.activateWorkspace, workspaceId),
+  setWorkspacePinned: (workspaceId, pinned) =>
+    ipcRenderer.invoke(IPC_CHANNELS.setWorkspacePinned, workspaceId, pinned),
+  removeWorkspace: (workspaceId) =>
+    ipcRenderer.invoke(IPC_CHANNELS.removeWorkspace, workspaceId),
+  listSessions: (workspaceId, offset, query) =>
+    ipcRenderer.invoke(IPC_CHANNELS.listSessions, workspaceId, offset, query),
+  setSessionPinned: (workspaceId, sessionId, pinned) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.setSessionPinned,
+      workspaceId,
+      sessionId,
+      pinned
+    ),
+  setSessionArchived: (workspaceId, sessionId, archived) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.setSessionArchived,
+      workspaceId,
+      sessionId,
+      archived
+    ),
+  renameSession: (workspaceId, sessionId, title) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.renameSession,
+      workspaceId,
+      sessionId,
+      title
+    ),
+  deleteSession: (workspaceId, sessionId) =>
+    ipcRenderer.invoke(IPC_CHANNELS.deleteSession, workspaceId, sessionId),
+  getContextCandidates: (workspaceId, query) =>
+    ipcRenderer.invoke(IPC_CHANNELS.getContextCandidates, workspaceId, query),
   cancelPendingModelSelection: () =>
     ipcRenderer.invoke(IPC_CHANNELS.cancelPendingModelSelection),
   cancelProviderLogin: () =>
@@ -24,6 +59,8 @@ const desktopApi: DesktopApi = {
   loginProvider: (providerId) =>
     ipcRenderer.invoke(IPC_CHANNELS.loginProvider, providerId),
   newSession: () => ipcRenderer.invoke(IPC_CHANNELS.newSession),
+  createSession: (input, title) =>
+    ipcRenderer.invoke(IPC_CHANNELS.createSession, input, title),
   openRuntimeLog: () => ipcRenderer.invoke(IPC_CHANNELS.openRuntimeLog),
   openExternal: (url) =>
     ipcRenderer.invoke(IPC_CHANNELS.openExternal, url) as Promise<boolean>,

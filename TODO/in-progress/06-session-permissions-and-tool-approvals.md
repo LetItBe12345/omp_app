@@ -27,20 +27,23 @@
 - [ ] 权限按钮和 Popover 支持 Tab 聚焦、Enter、方向键和 Esc，不增加全局快捷键。
 - [ ] 固定映射`严格 → always-ask`、`标准 → write`、`全部允许 → yolo`；启动参数、日志和错误详情使用英文原值。
 - [ ] 未选中 Session 时显示禁用的`权限：全部允许`；Session 列表不显示权限标签。
-- [ ] 新建 Session 默认使用并保存“全部允许”；发送第一条消息前修改权限时立即保存，但发送首条消息时才启动 OMP。
+- [ ] 临时新会话默认使用“全部允许”；发送第一条消息前修改权限时只保存在 Renderer 内存，打开临时输入界面不停止或重启当前 Runtime。
+- [ ] 临时新会话首发时，权限相同则复用当前 Workspace Runtime 并调用 `new_session`；权限不同或 Runtime 不可用时保持当前 Workspace `cwd` 重启或启动，形成真实 Session 后再保存。
 - [ ] Main 按 Workspace ID 和 Session ID 将权限写入 Desktop 数据目录的配置文件，使用原子替换，不修改项目 `.omp/config.yml`，不增加数据库。
 - [ ] 只接受 `always-ask`、`write`、`yolo`；缺失或未知值按 `yolo` 打开，记录诊断日志并补存正确值。
-- [ ] 新 Session 权限保存失败时恢复上一次已保存的值，在输入框附近显示“权限保存失败”，不启动或重启 Runtime。
+- [ ] 首次 Prompt 形成真实 Session 后才保存权限；写入失败时显示“权限保存失败”，保留 Runtime 实际权限并允许重试，不能显示为已保存。
 - [ ] 重复选择当前权限时只关闭 Popover，不写配置、不重启 Runtime、不显示转圈。
 - [ ] 三种权限使用相同的普通按钮样式，不为“全部允许”增加警告色或风险提示。
 - [ ] Session 删除成功后清理权限、文字草稿、附件和历史缓存，删除失败时全部保留；归档保留权限和文字草稿，可以释放附件和历史缓存。
 - [ ] 文字草稿继续复用现有按 Workspace 和 Session 区分的 `localStorage`；附件只在当前 Desktop 运行期间按 Session 保留。
+- [ ] 未发送首条消息的临时新会话不写 `localStorage` 或 Desktop 配置；切换 Workspace、切换 Session 或关闭 Desktop 时丢弃文字、附件和权限。
 
 ### Runtime 启动与 Session 切换
 
 - [ ] 在 `RuntimeSnapshot` 和受控 IPC 中加入当前 Session 保存的权限模式。
 - [ ] 新建、打开、切换或异常恢复 Session 时读取其权限，Main 通过固定枚举和参数数组传入 `--approval-mode <mode>`，不经过 Shell。
 - [ ] 目标 Session 与当前 Runtime 权限相同时复用 Runtime；不同时重启 Runtime，再恢复目标 Session。
+- [ ] 权限导致的重启必须保持当前 Workspace 的 `cwd`；`switch_session` 只接受头部 `cwd` 属于当前 Workspace 的目标 Session。
 - [ ] 权限相同且不重启时，权限按钮不转圈；Session 恢复超过 150 毫秒时只在聊天区域显示加载状态。
 - [ ] 重启时不弹窗、不遮挡聊天页面，输入框保持可编辑；权限按钮立即显示目标权限并带小转圈，发送、权限修改和 Session 切换暂时禁用，不提供取消。
 - [ ] Renderer 只缓存当前 Session 和最近离开的 1 个 Session 的历史展示投影；不缓存 RPC 原始事件、Tool 完整输出、图片 Base64、二进制、动画或进度，也不跨 Desktop 重启保存。
@@ -112,7 +115,9 @@
 - [ ] 测试三种权限的中英文映射、默认“全部允许”、按 Session 隔离保存、原子写入、未知值回退和固定参数数组。
 - [ ] 测试 Session 删除、归档、缺失或无效值补存 `yolo`、草稿与附件清理规则。
 - [ ] 测试无 Session 时的禁用按钮、Session 列表不显示权限、Popover 初始焦点和重复选择当前权限。
-- [ ] 测试新 Session 修改权限后立即保存但延迟启动 Runtime，以及保存失败时恢复原值。
+- [ ] 测试临时新会话的权限只在内存中存在，切换或关闭时丢弃，首次 Prompt 形成真实 Session 后才保存。
+- [ ] 测试临时新会话首发时相同权限复用 Runtime、不同权限保持原 Workspace `cwd` 重启。
+- [ ] 测试首次权限写入失败时显示未保存状态并允许重试，Runtime 仍使用实际启动权限。
 - [ ] 测试相同权限复用 Runtime，不同权限重启并恢复目标 Session；异常重启继续使用当前 Session 权限。
 - [ ] 测试重启期间按钮显示目标权限，成功后不提示，失败后恢复显示原权限。
 - [ ] 测试权限修改成功后才保存新值；失败时恢复原值并按原权限启动；新旧权限均失败时进入 Runtime 错误状态。

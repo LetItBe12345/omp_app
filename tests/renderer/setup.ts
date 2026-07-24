@@ -22,6 +22,26 @@ if (typeof window !== 'undefined') {
     configurable: true,
     value: {
       chooseWorkspace: vi.fn().mockResolvedValue({ ok: true, data: null }),
+      getWorkspaces: vi.fn().mockResolvedValue({
+        ok: true,
+        data: { workspaces: [], hasMore: false }
+      }),
+      activateWorkspace: vi.fn(),
+      setWorkspacePinned: vi.fn(),
+      removeWorkspace: vi.fn(),
+      listSessions: vi.fn().mockResolvedValue({
+        ok: true,
+        data: { sessions: [], hasMore: false, nextOffset: 0 }
+      }),
+      setSessionPinned: vi
+        .fn()
+        .mockResolvedValue({ ok: true, data: undefined }),
+      setSessionArchived: vi
+        .fn()
+        .mockResolvedValue({ ok: true, data: undefined }),
+      renameSession: vi.fn().mockResolvedValue({ ok: true, data: undefined }),
+      deleteSession: vi.fn().mockResolvedValue({ ok: true, data: undefined }),
+      getContextCandidates: vi.fn().mockResolvedValue({ ok: true, data: [] }),
       cancelPendingModelSelection: vi.fn().mockResolvedValue({
         ok: true,
         data: { status: 'ready', isStreaming: false, queuedMessageCount: 0 }
@@ -47,6 +67,16 @@ if (typeof window !== 'undefined') {
       }),
       loginProvider: vi.fn().mockResolvedValue({ ok: true, data: undefined }),
       newSession: vi.fn(),
+      createSession: vi.fn().mockResolvedValue({
+        ok: true,
+        data: {
+          status: 'ready',
+          workspacePath: '/tmp/workspace',
+          sessionId: 'new-session',
+          isStreaming: true,
+          queuedMessageCount: 0
+        }
+      }),
       onRuntimeEvent: vi.fn().mockReturnValue(vi.fn()),
       openExternal: vi.fn(),
       openRuntimeLog: vi.fn(),
@@ -75,5 +105,8 @@ if (typeof window !== 'undefined') {
   })
 }
 
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  if (typeof localStorage !== 'undefined') localStorage.clear()
+})
 afterEach(() => vi.clearAllMocks())

@@ -1,0 +1,64 @@
+// @vitest-environment node
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { describe, expect, it } from 'vitest'
+import { DesktopStateStore } from '../../src/main/desktop-state'
+
+describe('DesktopStateStore', () => {
+  it('生成稳定 Workspace ID 并使用 0600 原子配置', async () => {
+    const root = join(tmpdir(), `omp-state-${process.pid}-${Date.now()}`)
+    const workspace = join(root, 'workspace')
+    await mkdir(workspace, { recursive: true })
+    const path = join(root, 'desktop-state.json')
+    const store = new DesktopStateStore(path)
+    await store.load()
+    const first = await store.addWorkspace(workspace)
+    const second = await store.addWorkspace(workspace)
+    expect(second.id).toBe(first.id)
+    expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject({
+      version: 1,
+      activeWorkspaceId: first.id
+    })
+    expect((await stat(path)).mode & 0o777).toBe(0o600)
+  })
+
+  it('迁移旧 runtime-state 且归档与置顶互斥', async () => {
+    const root = join(tmpdir(), `omp-state-legacy-${process.pid}-${Date.now()}`)
+    const workspace = join(root, 'workspace')
+    await mkdir(workspace, { recursive: true })
+    const legacy = join(root, 'runtime-state.json')
+    await writeFile(legacy, JSON.stringify({ workspacePath: workspace }))
+    const store = new DesktopStateStore(
+      join(root, 'desktop-state.json'),
+      legacy
+    )
+    const state = await store.load()
+    const workspaceId = state.activeWorkspaceId!
+    await store.updateSessionPreference(workspaceId, 'session', {
+      pinned: true
+    })
+    await store.updateSessionPreference(workspaceId, 'session', {
+      archived: true,
+      pinned: false
+    })
+    expect(store.sessionPreference(workspaceId, 'session')).toMatchObject({
+      pinned: false,
+      archived: true
+    })
+  })
+
+  it('原子写入失败时恢复内存中的旧状态', async () => {
+    const root = join(
+      tmpdir(),
+      `omp-state-failure-${process.pid}-${Date.now()}`
+    )
+    const workspace = join(root, 'workspace')
+    const invalidStatePath = join(root, 'state-as-directory')
+    await mkdir(workspace, { recursive: true })
+    await mkdir(invalidStatePath)
+    const store = new DesktopStateStore(invalidStatePath)
+    await expect(store.addWorkspace(workspace)).rejects.toThrow()
+    expect(store.state.workspaces).toEqual([])
+  })
+})

@@ -1,0 +1,4 @@
+{"type":"title","v":1,"title":"V3 会话","source":"user","updatedAt":"2025-03-01T00:00:00.000Z","pad":""}
+{"type":"session","version":3,"id":"session-v3","timestamp":"2025-03-01T00:00:00.000Z","cwd":"/tmp/omp-workspace","titleSource":"user"}
+{"type":"message","id":"m1","parentId":null,"timestamp":"2025-03-01T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"检查 v3"}]}}
+{"type":"message","id":"m2","parentId":"m1","timestamp":"2025-03-01T00:00:02.000Z","message":{"role":"assistant","content":[{"type":"text","text":"v3 正常"}],"stopReason":"stop"}}

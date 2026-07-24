@@ -22,7 +22,7 @@
 - [x] [MVP-02：OMP RPC 与 IPC 主链路](../done/02-omp-rpc-runtime-and-ipc.md)
 - [x] [MVP-03：模型授权、Provider 与模型选择](../done/03-model-authorization-provider-and-selection.md)
 - [x] [MVP-04：流式对话与执行轨迹](../done/04-streaming-conversation-and-run-trace.md)
-- [ ] [MVP-05：Workspace、Session 与上下文引用](./05-workspace-session-and-context.md)
+- [x] [MVP-05：Workspace、Session 与上下文引用](../done/05-workspace-session-and-context.md)
 - [ ] [MVP-06：Session 权限与工具审批](./06-session-permissions-and-tool-approvals.md)
 - [ ] [MVP-07：文件树与上下文引用](./07-files-preview-and-edit.md)
 - [ ] [MVP-08：OMP Runtime 环境与网络](./08-runtime-environment-and-network.md)

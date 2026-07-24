@@ -1,13 +1,15 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron'
-import { readFile, writeFile } from 'node:fs/promises'
+import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { PerformanceEntry, RendererLogEntry } from '../shared/desktop-api'
 import { IPC_CHANNELS } from '../shared/desktop-api'
 import { validateExternalUrl } from './external-url'
 import { initializeLogger, log, recordMainPerformance } from './logger'
+import { DesktopStateStore } from './desktop-state'
 import { registerRuntimeIpc } from './runtime-ipc'
 import { RuntimeDiagnostics } from './runtime-diagnostics'
 import { RuntimeSupervisor } from './runtime-supervisor'
+import { listWorkspaceSessions } from './session-catalog'
 import { installNavigationSecurity, installSessionSecurity } from './security'
 
 const development = Boolean(process.env['ELECTRON_RENDERER_URL'])
@@ -29,39 +31,36 @@ const runtimeSupervisor = new RuntimeSupervisor({
   diagnostics: new RuntimeDiagnostics(join(app.getPath('logs'), 'runtime.log'))
 })
 const runtimeStatePath = join(app.getPath('userData'), 'runtime-state.json')
-let persistedRuntimeState = ''
-
-type PersistedRuntimeState = {
-  workspacePath: string
-  sessionPath?: string
-}
-
-async function persistRuntimeState(
-  state: PersistedRuntimeState
-): Promise<void> {
-  const serialized = JSON.stringify(state)
-  if (serialized === persistedRuntimeState) return
-  persistedRuntimeState = serialized
-  await writeFile(runtimeStatePath, serialized, {
-    encoding: 'utf8',
-    mode: 0o600
-  })
-}
+const desktopStateStore = new DesktopStateStore(
+  join(app.getPath('userData'), 'desktop-state.json'),
+  runtimeStatePath
+)
 
 async function restoreRuntimeState(): Promise<void> {
-  const state = await readFile(runtimeStatePath, 'utf8')
-    .then((value) => JSON.parse(value) as unknown)
-    .catch(() => null)
-  if (!state || typeof state !== 'object' || Array.isArray(state)) return
-  const workspacePath = (state as Record<string, unknown>)['workspacePath']
-  const sessionPath = (state as Record<string, unknown>)['sessionPath']
-  if (typeof workspacePath !== 'string') return
+  const state = desktopStateStore.state
+  if (!state.activeWorkspaceId) return
+  const workspace = state.workspaces.find(
+    (item) => item.id === state.activeWorkspaceId
+  )
+  if (!workspace) return
 
   try {
-    await runtimeSupervisor.start(workspacePath)
-    if (typeof sessionPath === 'string') {
+    await runtimeSupervisor.start(workspace.path)
+    if (workspace.activeSessionId) {
       try {
-        await runtimeSupervisor.restoreSessionPath(sessionPath)
+        const sessions = await listWorkspaceSessions(
+          workspace.id,
+          workspace.path
+        )
+        const session = sessions.find(
+          (item) =>
+            item.id === workspace.activeSessionId &&
+            item.compatibility !== 'corrupt' &&
+            item.compatibility !== 'future'
+        )
+        if (!session) throw new Error('上次 Session 不存在')
+        runtimeSupervisor.trustSession(session.id, session.path)
+        await runtimeSupervisor.switchSession(session.id)
       } catch (error) {
         log.warn('上次 Session 不可用，改为新建 Session', error)
         await runtimeSupervisor.newSession()
@@ -82,14 +81,6 @@ async function restoreRuntimeState(): Promise<void> {
     log.warn('恢复上次 Runtime 状态失败', error)
   }
 }
-
-runtimeSupervisor.on('snapshot', (snapshot) => {
-  if (!snapshot.workspacePath) return
-  void persistRuntimeState({
-    workspacePath: snapshot.workspacePath,
-    ...(snapshot.sessionPath ? { sessionPath: snapshot.sessionPath } : {})
-  }).catch((error: unknown) => log.error('保存 Runtime 状态失败', error))
-})
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 if (!hasSingleInstanceLock) app.quit()
@@ -279,13 +270,15 @@ process.on('unhandledRejection', (reason) => {
 })
 
 if (hasSingleInstanceLock) {
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
     recordMainPerformance('app_ready')
     Menu.setApplicationMenu(null)
+    await desktopStateStore.load()
     registerIpc()
     createWindow()
     registerRuntimeIpc(
       runtimeSupervisor,
+      desktopStateStore,
       () => mainWindow,
       process.env['ELECTRON_RENDERER_URL']
     )

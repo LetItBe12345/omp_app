@@ -25,6 +25,9 @@ export type RuntimeErrorCode =
   | 'PROTOCOL_ERROR'
   | 'INVALID_ARGUMENT'
   | 'SESSION_NOT_FOUND'
+  | 'WORKSPACE_UNAVAILABLE'
+  | 'STATE_WRITE_FAILED'
+  | 'SESSION_INCOMPATIBLE'
   | 'UNSUPPORTED'
 
 export type RuntimeError = {
@@ -101,11 +104,74 @@ export type OmpEvent = {
 
 export type PromptInput = {
   message: string
+  references?: ContextReference[]
   images?: Array<{
     type: 'image'
     data: string
     mimeType: string
   }>
+}
+
+export type WorkspaceSummary = {
+  id: string
+  path: string
+  name: string
+  available: boolean
+  pinned: boolean
+  addedAt: string
+  lastUsedAt: string
+}
+
+export type SessionSummary = {
+  id: string
+  workspaceId: string
+  path: string
+  title: string
+  createdAt: string
+  modifiedAt: string
+  messageCount: number
+  size: number
+  pinned: boolean
+  archived: boolean
+  compatibility: 'v1' | 'v2' | 'v3' | 'corrupt' | 'future'
+  status:
+    'complete' | 'interrupted' | 'aborted' | 'error' | 'pending' | 'unknown'
+}
+
+export type WorkspaceOverview = {
+  activeWorkspaceId?: string
+  workspaces: WorkspaceSummary[]
+  hasMore: boolean
+}
+
+export type SessionPage = {
+  sessions: SessionSummary[]
+  hasMore: boolean
+  nextOffset: number
+}
+
+export type ContextCandidate = {
+  id: string
+  kind: 'file' | 'folder' | 'session'
+  name: string
+  detail: string
+  relativePath?: string
+  sessionId?: string
+  size?: number
+}
+
+export type ContextReference = {
+  id: string
+  kind: 'file' | 'folder' | 'session'
+  name: string
+  relativePath?: string
+  sessionId?: string
+}
+
+export type DraftRecord = {
+  text: string
+  references: ContextReference[]
+  updatedAt: string
 }
 
 export type RuntimeEvent =
@@ -126,6 +192,43 @@ export type DesktopApi = {
   openRuntimeLog(): Promise<boolean>
   revealPath(path: string): Promise<boolean>
   chooseWorkspace(): Promise<DesktopResult<RuntimeSnapshot | null>>
+  getWorkspaces(offset?: number): Promise<DesktopResult<WorkspaceOverview>>
+  activateWorkspace(
+    workspaceId: string
+  ): Promise<DesktopResult<RuntimeSnapshot>>
+  setWorkspacePinned(
+    workspaceId: string,
+    pinned: boolean
+  ): Promise<DesktopResult<WorkspaceOverview>>
+  removeWorkspace(workspaceId: string): Promise<DesktopResult<void>>
+  listSessions(
+    workspaceId: string,
+    offset?: number,
+    query?: string
+  ): Promise<DesktopResult<SessionPage>>
+  setSessionPinned(
+    workspaceId: string,
+    sessionId: string,
+    pinned: boolean
+  ): Promise<DesktopResult<void>>
+  setSessionArchived(
+    workspaceId: string,
+    sessionId: string,
+    archived: boolean
+  ): Promise<DesktopResult<void>>
+  renameSession(
+    workspaceId: string,
+    sessionId: string,
+    title: string
+  ): Promise<DesktopResult<void>>
+  deleteSession(
+    workspaceId: string,
+    sessionId: string
+  ): Promise<DesktopResult<void>>
+  getContextCandidates(
+    workspaceId: string,
+    query: string
+  ): Promise<DesktopResult<ContextCandidate[]>>
   getRuntimeState(): Promise<DesktopResult<RuntimeSnapshot>>
   getMessages(): Promise<DesktopResult<unknown>>
   getLoginProviders(): Promise<DesktopResult<LoginProvider[]>>
@@ -139,6 +242,10 @@ export type DesktopApi = {
   followUp(input: PromptInput): Promise<DesktopResult<void>>
   stopCurrentRun(): Promise<DesktopResult<PromptInput | null>>
   newSession(): Promise<DesktopResult<RuntimeSnapshot>>
+  createSession(
+    input: PromptInput,
+    title: string
+  ): Promise<DesktopResult<RuntimeSnapshot>>
   switchSession(sessionId: string): Promise<DesktopResult<RuntimeSnapshot>>
   selectModel(
     selection: ModelSelection
@@ -157,6 +264,16 @@ export type DesktopApi = {
 
 export const IPC_CHANNELS = {
   chooseWorkspace: 'runtime:choose-workspace',
+  getWorkspaces: 'workspace:list',
+  activateWorkspace: 'workspace:activate',
+  setWorkspacePinned: 'workspace:set-pinned',
+  removeWorkspace: 'workspace:remove',
+  listSessions: 'session:list',
+  setSessionPinned: 'session:set-pinned',
+  setSessionArchived: 'session:set-archived',
+  renameSession: 'session:rename',
+  deleteSession: 'session:delete',
+  getContextCandidates: 'context:candidates',
   cancelPendingModelSelection: 'runtime:cancel-pending-model-selection',
   cancelProviderLogin: 'runtime:cancel-provider-login',
   event: 'runtime:event',
@@ -168,6 +285,7 @@ export const IPC_CHANNELS = {
   getRuntimeState: 'runtime:get-state',
   log: 'desktop:log',
   newSession: 'runtime:new-session',
+  createSession: 'runtime:create-session',
   openExternal: 'desktop:open-external',
   openRuntimeLog: 'runtime:open-log',
   performance: 'desktop:performance',
