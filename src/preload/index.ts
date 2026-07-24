@@ -50,6 +50,8 @@ const desktopApi: DesktopApi = {
   cancelProviderLogin: () =>
     ipcRenderer.invoke(IPC_CHANNELS.cancelProviderLogin),
   followUp: (input) => ipcRenderer.invoke(IPC_CHANNELS.followUp, input),
+  getAvailableCommands: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.getAvailableCommands),
   getRuntimeState: () => ipcRenderer.invoke(IPC_CHANNELS.getRuntimeState),
   getMessages: () => ipcRenderer.invoke(IPC_CHANNELS.getMessages),
   getLoginProviders: () => ipcRenderer.invoke(IPC_CHANNELS.getLoginProviders),

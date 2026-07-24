@@ -11,6 +11,7 @@ import {
 import { promisify } from 'node:util'
 import type {
   ApprovalMode,
+  AvailableSlashCommand,
   AvailableModel,
   LoginProvider,
   ModelSelection,
@@ -97,6 +98,120 @@ function isRpcResponse(value: OmpEvent): value is OmpEvent & RpcResponse {
     value.type === 'response' &&
     typeof value['command'] === 'string' &&
     typeof value['success'] === 'boolean'
+  )
+}
+
+const AVAILABLE_COMMAND_SOURCES = new Set([
+  'builtin',
+  'skill',
+  'extension',
+  'custom',
+  'mcp_prompt',
+  'file'
+])
+
+function modelString(value: unknown): string | undefined {
+  if (typeof value === 'string') return value
+  if (!isRecord(value)) return undefined
+  const provider = value['provider']
+  const id = value['id']
+  return typeof provider === 'string' && typeof id === 'string'
+    ? `${provider}/${id}`
+    : undefined
+}
+
+function parseAvailableSlashCommand(
+  value: unknown
+): AvailableSlashCommand | undefined {
+  if (!isRecord(value) || typeof value['name'] !== 'string') return undefined
+  if (
+    typeof value['source'] !== 'string' ||
+    !AVAILABLE_COMMAND_SOURCES.has(value['source'])
+  ) {
+    return undefined
+  }
+  const aliases =
+    value['aliases'] === undefined
+      ? undefined
+      : Array.isArray(value['aliases']) &&
+          value['aliases'].every((alias) => typeof alias === 'string')
+        ? value['aliases']
+        : null
+  if (aliases === null) return undefined
+  const input =
+    value['input'] === undefined
+      ? undefined
+      : isRecord(value['input']) &&
+          (value['input']['hint'] === undefined ||
+            typeof value['input']['hint'] === 'string')
+        ? typeof value['input']['hint'] === 'string'
+          ? { hint: value['input']['hint'] }
+          : {}
+        : null
+  if (input === null) return undefined
+  const subcommands =
+    value['subcommands'] === undefined
+      ? undefined
+      : Array.isArray(value['subcommands'])
+        ? value['subcommands'].map((subcommand) => {
+            if (!isRecord(subcommand) || typeof subcommand['name'] !== 'string') {
+              return null
+            }
+            if (
+              subcommand['description'] !== undefined &&
+              typeof subcommand['description'] !== 'string'
+            ) {
+              return null
+            }
+            if (
+              subcommand['usage'] !== undefined &&
+              typeof subcommand['usage'] !== 'string'
+            ) {
+              return null
+            }
+            return {
+              name: subcommand['name'],
+              ...(typeof subcommand['description'] === 'string'
+                ? { description: subcommand['description'] }
+                : {}),
+              ...(typeof subcommand['usage'] === 'string'
+                ? { usage: subcommand['usage'] }
+                : {})
+            }
+          })
+        : null
+  if (subcommands === null || subcommands?.some((value) => value === null))
+    return undefined
+  return {
+    name: value['name'],
+    ...(aliases ? { aliases } : {}),
+    ...(typeof value['description'] === 'string'
+      ? { description: value['description'] }
+      : {}),
+    ...(input && Object.keys(input).length > 0 ? { input } : {}),
+    ...(subcommands && subcommands.length > 0
+      ? {
+          subcommands: subcommands.filter(
+            (candidate): candidate is NonNullable<typeof candidate> =>
+              candidate !== null
+          )
+        }
+      : {}),
+    source: value['source']
+  }
+}
+
+function parseAvailableCommandsPayload(value: unknown): AvailableSlashCommand[] {
+  const data = isRecord(value) ? value : {}
+  if (!Array.isArray(data['commands'])) {
+    throw new RuntimeFailure('PROTOCOL_ERROR', 'OMP 返回了无效命令目录', true)
+  }
+  const commands = data['commands'].map(parseAvailableSlashCommand)
+  if (commands.some((command) => command === undefined)) {
+    throw new RuntimeFailure('PROTOCOL_ERROR', 'OMP 返回了无效命令目录', true)
+  }
+  return commands.filter(
+    (command): command is NonNullable<typeof command> => command !== undefined
   )
 }
 
@@ -274,6 +389,14 @@ export class RuntimeSupervisor extends EventEmitter {
 
   async getMessages(): Promise<unknown> {
     return (await this.request({ type: 'get_messages' }, STATE_TIMEOUT_MS)).data
+  }
+
+  async getAvailableCommands(): Promise<AvailableSlashCommand[]> {
+    const response = await this.request(
+      { type: 'get_available_commands' },
+      STATE_TIMEOUT_MS
+    )
+    return parseAvailableCommandsPayload(response.data)
   }
 
   async getLoginProviders(): Promise<LoginProvider[]> {
@@ -911,6 +1034,34 @@ export class RuntimeSupervisor extends EventEmitter {
       this.#setSnapshot({ isStreaming: false })
       if (!this.#stoppingCurrentRun)
         void this.#applyPendingModelSelectionSafely()
+    } else if (event.type === 'config_update') {
+      const config = isRecord(event['config']) ? event['config'] : event
+      this.#setSnapshot({
+        model: modelString(config['model']) ?? this.#snapshot.model,
+        thinkingLevel:
+          typeof config['thinkingLevel'] === 'string'
+            ? config['thinkingLevel']
+            : typeof config['thinking_level'] === 'string'
+              ? config['thinking_level']
+              : this.#snapshot.thinkingLevel
+      })
+    } else if (event.type === 'session_info_update') {
+      const nextSessionId =
+        typeof event['sessionId'] === 'string'
+          ? event['sessionId']
+          : typeof event['session_id'] === 'string'
+            ? event['session_id']
+            : undefined
+      const previousSessionId = this.#snapshot.sessionId
+      this.#setSnapshot({
+        sessionId: nextSessionId ?? this.#snapshot.sessionId,
+        sessionName:
+          typeof event['title'] === 'string'
+            ? event['title']
+            : this.#snapshot.sessionName
+      })
+      if (nextSessionId && previousSessionId && nextSessionId !== previousSessionId)
+        void this.getState().catch(() => undefined)
     }
   }
 
@@ -925,14 +1076,12 @@ export class RuntimeSupervisor extends EventEmitter {
     if (sessionId && sessionPath)
       this.#trustedSessions.set(sessionId, sessionPath)
 
-    const model = isRecord(value['model'])
-      ? [value['model']['provider'], value['model']['id']]
-          .filter((part): part is string => typeof part === 'string')
-          .join('/')
-      : undefined
-
     this.#setSnapshot({
       sessionId,
+      sessionName:
+        typeof value['sessionName'] === 'string'
+          ? value['sessionName']
+          : this.#snapshot.sessionName,
       sessionPath,
       isStreaming:
         typeof value['isStreaming'] === 'boolean'
@@ -942,7 +1091,7 @@ export class RuntimeSupervisor extends EventEmitter {
         typeof value['queuedMessageCount'] === 'number'
           ? value['queuedMessageCount']
           : this.#snapshot.queuedMessageCount,
-      model: model || undefined,
+      model: modelString(value['model']) ?? undefined,
       thinkingLevel:
         typeof value['thinkingLevel'] === 'string'
           ? value['thinkingLevel']

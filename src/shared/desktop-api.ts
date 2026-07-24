@@ -55,6 +55,7 @@ export type RuntimeSnapshot = {
   status: RuntimeStatus
   workspacePath?: string
   sessionId?: string
+  sessionName?: string
   sessionPath?: string
   isStreaming: boolean
   queuedMessageCount: number
@@ -88,6 +89,31 @@ export type AvailableModel = {
     efforts: string[]
     defaultLevel?: string
   }
+}
+
+export type AvailableSlashCommandSource =
+  | 'builtin'
+  | 'skill'
+  | 'extension'
+  | 'custom'
+  | 'mcp_prompt'
+  | 'file'
+
+export type AvailableSlashSubcommand = {
+  name: string
+  description?: string
+  usage?: string
+}
+
+export type AvailableSlashCommand = {
+  name: string
+  aliases?: string[]
+  description?: string
+  input?: {
+    hint?: string
+  }
+  subcommands?: AvailableSlashSubcommand[]
+  source: AvailableSlashCommandSource
 }
 
 export type ModelSelection = {
@@ -261,6 +287,7 @@ export type DesktopApi = {
   ): Promise<DesktopResult<ContextCandidate[]>>
   getRuntimeState(): Promise<DesktopResult<RuntimeSnapshot>>
   getMessages(): Promise<DesktopResult<unknown>>
+  getAvailableCommands(): Promise<DesktopResult<AvailableSlashCommand[]>>
   getLoginProviders(): Promise<DesktopResult<LoginProvider[]>>
   getAvailableModels(): Promise<DesktopResult<AvailableModel[]>>
   getProviderLoginState(): Promise<DesktopResult<ProviderLoginState>>
@@ -312,6 +339,7 @@ export const IPC_CHANNELS = {
   cancelProviderLogin: 'runtime:cancel-provider-login',
   event: 'runtime:event',
   followUp: 'runtime:follow-up',
+  getAvailableCommands: 'runtime:get-available-commands',
   getMessages: 'runtime:get-messages',
   getLoginProviders: 'runtime:get-login-providers',
   getAvailableModels: 'runtime:get-available-models',
