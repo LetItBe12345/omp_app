@@ -239,7 +239,10 @@ export function WorkspaceFileTreePortal({
       .filter(
         (child) => child.getAttribute('data-slot') !== 'workspace-file-tree'
       )
-      .map((child) => ({ child: child as HTMLElement, hidden: child.hidden }))
+      .map((child) => {
+        const element = child as HTMLElement
+        return { child: element, hidden: element.hidden }
+      })
     target.style.position = 'relative'
     for (const item of previousChildren) item.child.hidden = true
     return () => {
