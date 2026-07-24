@@ -1,9 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import {
-  CONTEXT_REFERENCE_MIME,
-  WorkspaceFileTreePortal
-} from '../../src/renderer/workspace-file-tree'
+import { CONTEXT_REFERENCE_MIME } from '../../src/renderer/context-drag'
+import { WorkspaceFileTreePortal } from '../../src/renderer/workspace-file-tree'
 
 describe('WorkspaceFileTreePortal', () => {
   it('懒加载目录并把节点编码为统一拖拽引用', async () => {
