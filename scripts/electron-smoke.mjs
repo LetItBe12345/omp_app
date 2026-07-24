@@ -81,16 +81,23 @@ child.stdout.on('data', (chunk) => {
   process.stdout.write(output)
   if (!rendererReady && stdout.includes('OMP_SMOKE_READY')) {
     rendererReady = true
+    clearTimeout(timeout)
     if (terminateOnReady) {
       terminatedAfterReady = true
       terminateChild()
+    } else {
+      timeout = setTimeout(() => {
+        terminateChild()
+        console.error('Electron smoke 退出超时')
+        process.exitCode = 1
+      }, 10_000)
     }
   }
 })
 
 child.stderr.on('data', (chunk) => process.stderr.write(chunk))
 
-const timeout = setTimeout(() => {
+let timeout = setTimeout(() => {
   terminateChild()
   console.error('Electron smoke 超时')
   process.exitCode = 1
