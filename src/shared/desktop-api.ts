@@ -58,6 +58,7 @@ export type LoginProvider = {
   id: string
   name: string
   available: boolean
+  authenticated: boolean
 }
 
 export type AvailableModel = {
@@ -148,6 +149,11 @@ export type SessionPage = {
   sessions: SessionSummary[]
   hasMore: boolean
   nextOffset: number
+}
+
+export type CreatedSession = {
+  snapshot: RuntimeSnapshot
+  session: SessionSummary
 }
 
 export type ContextCandidate = {
@@ -245,7 +251,7 @@ export type DesktopApi = {
   createSession(
     input: PromptInput,
     title: string
-  ): Promise<DesktopResult<RuntimeSnapshot>>
+  ): Promise<DesktopResult<CreatedSession>>
   switchSession(sessionId: string): Promise<DesktopResult<RuntimeSnapshot>>
   selectModel(
     selection: ModelSelection

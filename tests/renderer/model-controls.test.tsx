@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type {
   AvailableModel,
+  LoginProvider,
   ProviderLoginState,
   RuntimeSnapshot
 } from '../../src/shared/desktop-api'
@@ -36,15 +37,25 @@ function renderControls({
   loginState = { status: 'idle' },
   modelList = models,
   providerList = [
-    { id: 'browser', name: 'Browser Login', available: true },
-    { id: 'disabled', name: 'Disabled', available: false }
+    {
+      id: 'browser',
+      name: 'Browser Login',
+      available: true,
+      authenticated: false
+    },
+    {
+      id: 'disabled',
+      name: 'Disabled',
+      available: false,
+      authenticated: false
+    }
   ],
   runtimeState = runtime,
   catalogError = null
 }: {
   loginState?: ProviderLoginState
   modelList?: AvailableModel[]
-  providerList?: Array<{ id: string; name: string; available: boolean }>
+  providerList?: LoginProvider[]
   runtimeState?: RuntimeSnapshot
   catalogError?: string | null
 } = {}) {
@@ -114,8 +125,18 @@ describe('ModelControls', () => {
         }
       ],
       providerList: [
-        { id: 'zeta', name: 'Zeta Provider', available: true },
-        { id: 'alpha', name: 'Alpha Provider', available: true }
+        {
+          id: 'zeta',
+          name: 'Zeta Provider',
+          available: true,
+          authenticated: false
+        },
+        {
+          id: 'alpha',
+          name: 'Alpha Provider',
+          available: true,
+          authenticated: false
+        }
       ],
       runtimeState: { ...runtime, model: 'zeta/z-first' }
     })
@@ -289,6 +310,28 @@ describe('ModelControls', () => {
     ).toBeInTheDocument()
   })
 
+  it('已登录 Provider 显示状态且不会重复触发登录', async () => {
+    renderControls({
+      providerList: [
+        {
+          id: 'openai-codex',
+          name: 'OpenAI Codex',
+          available: true,
+          authenticated: true
+        }
+      ]
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '选择模型' }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: '添加 Provider' })
+    )
+
+    expect(await screen.findByText('已登录')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('OpenAI Codex'))
+    expect(window.desktop.loginProvider).not.toHaveBeenCalled()
+  })
+
   it('Provider 输入默认遮挡，并通过 Extension UI 响应回传', async () => {
     let finishLogin:
       ((value: { ok: true; data: undefined }) => void) | undefined
@@ -323,7 +366,14 @@ describe('ModelControls', () => {
         onRefreshModels={view.onRefreshModels}
         onRefreshProviders={view.onRefreshProviders}
         onSnapshot={view.onSnapshot}
-        providers={[{ id: 'browser', name: 'Browser Login', available: true }]}
+        providers={[
+          {
+            id: 'browser',
+            name: 'Browser Login',
+            available: true,
+            authenticated: false
+          }
+        ]}
         runtime={{ ...runtime, isAuthenticating: true }}
       />
     )
@@ -368,7 +418,14 @@ describe('ModelControls', () => {
         onRefreshModels={view.onRefreshModels}
         onRefreshProviders={view.onRefreshProviders}
         onSnapshot={view.onSnapshot}
-        providers={[{ id: 'browser', name: 'Browser Login', available: true }]}
+        providers={[
+          {
+            id: 'browser',
+            name: 'Browser Login',
+            available: true,
+            authenticated: false
+          }
+        ]}
         runtime={{ ...runtime, isAuthenticating: true }}
       />
     )
@@ -392,7 +449,14 @@ describe('ModelControls', () => {
         onRefreshModels={view.onRefreshModels}
         onRefreshProviders={view.onRefreshProviders}
         onSnapshot={view.onSnapshot}
-        providers={[{ id: 'browser', name: 'Browser Login', available: true }]}
+        providers={[
+          {
+            id: 'browser',
+            name: 'Browser Login',
+            available: true,
+            authenticated: false
+          }
+        ]}
         runtime={{ ...runtime, isAuthenticating: true }}
       />
     )

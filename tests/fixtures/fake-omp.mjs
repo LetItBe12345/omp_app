@@ -53,6 +53,18 @@ lines.on('line', (line) => {
       })
       break
     case 'prompt':
+      if (command.message === 'complete-before-response') {
+        isStreaming = true
+        send({ type: 'agent_start' })
+        isStreaming = false
+        send({ type: 'agent_end' })
+        response({ agentInvoked: true })
+        break
+      }
+      if (command.message === 'local-only') {
+        response({ agentInvoked: false })
+        break
+      }
       response()
       isStreaming = true
       send({ type: 'agent_start' })
@@ -82,10 +94,30 @@ lines.on('line', (line) => {
     case 'get_login_providers':
       response({
         providers: [
-          { id: 'test', name: 'Test Provider', available: true },
-          { id: 'browser', name: 'Browser Login', available: true },
-          { id: 'terminal-only', name: 'Terminal Only', available: true },
-          { id: 'disabled', name: 'Disabled Provider', available: false }
+          {
+            id: 'test',
+            name: 'Test Provider',
+            available: true,
+            authenticated: true
+          },
+          {
+            id: 'browser',
+            name: 'Browser Login',
+            available: true,
+            authenticated: false
+          },
+          {
+            id: 'terminal-only',
+            name: 'Terminal Only',
+            available: true,
+            authenticated: false
+          },
+          {
+            id: 'disabled',
+            name: 'Disabled Provider',
+            available: false,
+            authenticated: false
+          }
         ]
       })
       break

@@ -1329,7 +1329,14 @@ export function registerRuntimeIpc(
           .catch((error: unknown) =>
             log.warn('自动设置 Session 标题失败', error)
           )
-        return success(snapshot)
+        const { session } = await requireSession(
+          workspace.id,
+          snapshot.sessionId
+        )
+        return success({
+          snapshot,
+          session: stateStore.applyPreferences(workspace.id, session)
+        })
       } catch (error) {
         return failure(error)
       }
