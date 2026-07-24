@@ -217,47 +217,22 @@ function WorkspaceFileTree({
   )
 }
 
-function useFileTreeTarget(): HTMLElement | null {
-  const [target, setTarget] = useState<HTMLElement | null>(() =>
-    document.querySelector<HTMLElement>('[data-slot="file-tree"]')
-  )
-  useEffect(() => {
-    const observer = new MutationObserver(() => {
-      setTarget(document.querySelector<HTMLElement>('[data-slot="file-tree"]'))
-    })
-    observer.observe(document.body, { childList: true, subtree: true })
-    return () => observer.disconnect()
-  }, [])
-  return target
-}
-
 export function WorkspaceFileTreePortal({
   workspaceId
 }: {
   workspaceId?: string
 }): React.JSX.Element | null {
-  const target = useFileTreeTarget()
-  useEffect(() => {
-    if (!target || !workspaceId) return
-    const previousPosition = target.style.position
-    const previousChildren = Array.from(target.children)
-      .filter(
-        (child) => child.getAttribute('data-slot') !== 'workspace-file-tree'
-      )
-      .map((child) => {
-        const element = child as HTMLElement
-        return { child: element, hidden: element.hidden }
-      })
-    target.style.position = 'relative'
-    for (const item of previousChildren) item.child.hidden = true
-    return () => {
-      target.style.position = previousPosition
-      for (const item of previousChildren) item.child.hidden = item.hidden
-    }
-  }, [target, workspaceId])
-  if (!target || !workspaceId) return null
+  if (!workspaceId) return null
+  const target = document.querySelector<HTMLElement>('[data-slot="file-tree"]')
+  if (!target) return null
   return createPortal(
-    <WorkspaceFileTree key={workspaceId} workspaceId={workspaceId} />,
+    <>
+      <style>{`
+        [data-slot='file-tree'] { position: relative; }
+        [data-slot='file-tree'] > :not([data-slot='workspace-file-tree']) { display: none; }
+      `}</style>
+      <WorkspaceFileTree workspaceId={workspaceId} />
+    </>,
     target
   )
 }
