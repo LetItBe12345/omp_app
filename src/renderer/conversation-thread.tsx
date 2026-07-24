@@ -46,6 +46,7 @@ import {
   turnStatusText,
   type ActionItem,
   type AssistantTurn,
+  type ArtifactItem,
   type ConversationProjection,
   type InteractionItem
 } from './omp-event-reducer'
@@ -164,6 +165,48 @@ function findText(message: AppendMessage): string {
 const convertThreadMessage = (message: ThreadMessageLike): ThreadMessageLike =>
   message
 
+function CopyActionButton({
+  label,
+  value,
+  className
+}: {
+  label: string
+  value: string
+  className?: string
+}): React.JSX.Element {
+  const [state, setState] = useState<'idle' | 'success' | 'error'>('idle')
+
+  const copy = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(value)
+      setState('success')
+    } catch {
+      setState('error')
+    }
+    window.setTimeout(() => setState('idle'), 1_500)
+  }
+
+  return (
+    <button
+      aria-label={label}
+      className={className ?? 'message-copy'}
+      onClick={() => void copy()}
+      type="button"
+    >
+      {state === 'success' ? (
+        <Check size={13} />
+      ) : state === 'error' ? (
+        <>
+          <CircleAlert size={13} />
+          <span>复制失败</span>
+        </>
+      ) : (
+        <Copy size={13} />
+      )}
+    </button>
+  )
+}
+
 function statusIcon(action: ActionItem): ReactNode {
   if (action.state === 'running' || action.state === 'pending') {
     return (
@@ -252,6 +295,38 @@ function ToolRow({
         </button>
       )}
     </div>
+  )
+}
+
+function CommandResultCard({
+  item
+}: {
+  item: ArtifactItem
+}): React.JSX.Element {
+  const lines = item.value.split(/\r?\n/u)
+  const truncated = lines.length > 8
+  const [expanded, setExpanded] = useState(false)
+  const visible = expanded || !truncated ? lines : lines.slice(0, 8)
+  return (
+    <section className="command-result-card">
+      <div className="command-result-body">
+        <pre>{visible.join('\n')}</pre>
+      </div>
+      <div className="command-result-footer">
+        <div className="command-result-actions">
+          <CopyActionButton label="复制命令结果" value={item.copyText} />
+          {truncated && (
+            <button
+              className="message-copy"
+              onClick={() => setExpanded((value) => !value)}
+              type="button"
+            >
+              {expanded ? '收起' : `展开 · 共 ${lines.length} 行`}
+            </button>
+          )}
+        </div>
+      </div>
+    </section>
   )
 }
 
@@ -793,9 +868,21 @@ function AssistantMessage(): React.JSX.Element | null {
   }, [isAtBottom, setProjection, turn])
 
   if (!turn || !setProjection) return null
-  const hasProcess = turn.items.some(
-    (item) => item.kind !== 'narrative' || item.narrative !== 'final'
+  const commandResults = turn.items.filter(
+    (item): item is ArtifactItem =>
+      item.kind === 'artifact' && item.artifact === 'command-result'
   )
+  const hasProcess = turn.items.some(
+    (item) =>
+      item.kind !== 'artifact' &&
+      (item.kind !== 'narrative' || item.narrative !== 'final')
+  )
+  const finalText = turn.finalItemIds
+    .map((id) => turn.items.find((item) => item.id === id))
+    .flatMap((item) =>
+      item?.kind === 'narrative' && item.narrative === 'final' ? [item.text] : []
+    )
+    .join('')
   const collapsed = shouldCollapseTurn(turn)
   const expanded = !collapsed
 
@@ -819,6 +906,9 @@ function AssistantMessage(): React.JSX.Element | null {
       {hasProcess && expanded && (
         <ProcessContents expanded={expanded} turn={turn} />
       )}
+      {commandResults.map((item) => (
+        <CommandResultCard item={item} key={item.id} />
+      ))}
       <div className="assistant-final">
         <MessagePrimitive.Parts
           components={{
@@ -834,11 +924,22 @@ function AssistantMessage(): React.JSX.Element | null {
           }}
         />
       </div>
+      {finalText ? (
+        <div className="assistant-copy-row">
+          <CopyActionButton label="复制回答" value={finalText} />
+        </div>
+      ) : null}
     </MessagePrimitive.Root>
   )
 }
 
 function UserMessage(): React.JSX.Element {
+  const text = useAuiState((state) =>
+    state.message.content
+      .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
+      .map((part) => part.text)
+      .join('')
+  )
   return (
     <MessagePrimitive.Root className="user-message" data-role="user">
       <MessagePrimitive.Parts
@@ -846,6 +947,15 @@ function UserMessage(): React.JSX.Element {
           Text: () => <MessagePartPrimitive.Text />
         }}
       />
+      {text ? (
+        <div className="user-copy-row">
+          <CopyActionButton
+            className="message-copy"
+            label="复制用户输入"
+            value={text}
+          />
+        </div>
+      ) : null}
     </MessagePrimitive.Root>
   )
 }
@@ -885,6 +995,28 @@ function LiveAssistantTurn({
   }, [setProjection, toolApprovals, turn])
   if (!turn) return null
   const expanded = !shouldCollapseTurn(turn)
+  const commandResults = turn.items.filter(
+    (item): item is ArtifactItem =>
+      item.kind === 'artifact' && item.artifact === 'command-result'
+  )
+  const hasProcess = turn.items.some(
+    (item) =>
+      item.kind !== 'artifact' &&
+      (item.kind !== 'narrative' || item.narrative !== 'final')
+  )
+  if (!hasProcess && commandResults.length > 0) {
+    return (
+      <div
+        className="assistant-message"
+        data-message-id={turn.id}
+        data-role="assistant"
+      >
+        {commandResults.map((item) => (
+          <CommandResultCard item={item} key={item.id} />
+        ))}
+      </div>
+    )
+  }
   return (
     <div
       className="assistant-message"

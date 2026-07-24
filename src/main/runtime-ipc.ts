@@ -288,6 +288,7 @@ export function registerRuntimeIpc(
     IPC_CHANNELS.getContextCandidates,
     IPC_CHANNELS.cancelPendingModelSelection,
     IPC_CHANNELS.cancelProviderLogin,
+    IPC_CHANNELS.getAvailableCommands,
     IPC_CHANNELS.getAvailableModels,
     IPC_CHANNELS.getLoginProviders,
     IPC_CHANNELS.getProviderLoginState,
@@ -1467,6 +1468,15 @@ export function registerRuntimeIpc(
     try {
       assertTrustedSender(event, getWindow, developmentUrl)
       return success(await supervisor.getMessages())
+    } catch (error) {
+      return failure(error)
+    }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.getAvailableCommands, async (event) => {
+    try {
+      assertTrustedSender(event, getWindow, developmentUrl)
+      return success(await supervisor.getAvailableCommands())
     } catch (error) {
       return failure(error)
     }

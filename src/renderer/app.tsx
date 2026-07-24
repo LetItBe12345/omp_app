@@ -1,16 +1,20 @@
+import * as Popover from '@radix-ui/react-popover'
+import { Command } from 'cmdk'
 import {
+  Check,
   CircleStop,
   ChevronRight,
   FileText,
   Folder,
   MessageSquare,
+  Search,
   Settings2
 } from 'lucide-react'
-import { ComposerPrimitive } from '@assistant-ui/react'
 import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState
 } from 'react'
@@ -18,6 +22,7 @@ import { Group, Panel, Separator } from 'react-resizable-panels'
 import { uiFixture } from '../../tests/fixtures/ui-fixture'
 import type {
   ApprovalMode,
+  AvailableSlashCommand,
   AvailableModel,
   ContextReference,
   CreatedSession,
@@ -45,6 +50,15 @@ import {
   loadDraft,
   saveDraft
 } from './draft-store'
+import {
+  fillSlashCommand,
+  fillSlashSubcommand,
+  getSlashMenuModel,
+  preparePromptSubmission,
+  submitSlashCommand,
+  submitSlashSubcommand,
+  validateAvailableCommands
+} from './slash-commands'
 import { WorkspaceSidebar } from './workspace-sidebar'
 
 const fixture = __OMP_UI_FIXTURE__ ? uiFixture : null
@@ -65,7 +79,10 @@ const knownOmpEventTypes = new Set([
   'tool_execution_start',
   'tool_execution_update',
   'tool_execution_end',
+  'command_output',
   'prompt_result',
+  'config_update',
+  'session_info_update',
   'extension_ui_request',
   'extension_ui_resolved',
   'available_commands_update',
@@ -154,6 +171,15 @@ function hasTextSelection(): boolean {
   return !window.getSelection()?.isCollapsed
 }
 
+type SlashCatalogState = {
+  sessionKey?: string
+  commands: AvailableSlashCommand[]
+  loading: boolean
+  error: string | null
+  stale: boolean
+  hasFreshSnapshot: boolean
+}
+
 function Conversation({
   runtime,
   onSnapshot,
@@ -179,7 +205,9 @@ function Conversation({
   recentReferences,
   onSentReferences,
   attachments,
-  onAttachments
+  onAttachments,
+  slashCatalog,
+  onRefreshSlashCommands
 }: {
   runtime: RuntimeSnapshot
   onSnapshot: (snapshot: RuntimeSnapshot) => void
@@ -206,6 +234,8 @@ function Conversation({
   onSentReferences: (references: ContextReference[]) => void
   attachments: NonNullable<PromptInput['images']>
   onAttachments: (attachments: NonNullable<PromptInput['images']>) => void
+  slashCatalog: SlashCatalogState
+  onRefreshSlashCommands: () => Promise<void>
 }): React.JSX.Element {
   const [stopping, setStopping] = useState(false)
   const [sending, setSending] = useState(false)
@@ -219,9 +249,39 @@ function Conversation({
     runtime.status === 'ready' &&
     !runtime.isAuthenticating &&
     currentModelAvailable
+  const composerRef = useRef<HTMLTextAreaElement | null>(null)
   const busyRef = useRef(busy)
   const stoppingRef = useRef(stopping)
   const stopRef = useRef<() => Promise<void>>(async () => undefined)
+  const [slashMenuDismissed, setSlashMenuDismissed] = useState(false)
+  const [slashSelectionIndex, setSlashSelectionIndex] = useState(0)
+  const slashMenu = useMemo(
+    () =>
+      getSlashMenuModel(
+        input,
+        composerRef.current?.selectionStart,
+        slashCatalog.commands
+      ),
+    [input, slashCatalog.commands]
+  )
+  const slashCandidates = slashMenu?.candidates ?? []
+  const slashMenuOpen =
+    !busy &&
+    !slashMenuDismissed &&
+    slashMenu !== null &&
+    (slashCandidates.length > 0 || slashCatalog.loading || slashCatalog.error)
+  const selectedCommand =
+    slashMenu?.level === 'command'
+      ? slashMenu.candidates[
+          Math.min(slashSelectionIndex, Math.max(0, slashMenu.candidates.length - 1))
+        ]
+      : undefined
+  const selectedSubcommand =
+    slashMenu?.level === 'subcommand'
+      ? slashMenu.candidates[
+          Math.min(slashSelectionIndex, Math.max(0, slashMenu.candidates.length - 1))
+        ]
+      : undefined
 
   const stop = async (): Promise<void> => {
     if (!busy || stopping) return
@@ -261,17 +321,45 @@ function Conversation({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
+  useEffect(() => {
+    setSlashMenuDismissed(false)
+  }, [input, slashCatalog.sessionKey])
+
+  useEffect(() => {
+    setSlashSelectionIndex(0)
+  }, [slashMenu?.level, slashMenu?.query, slashCatalog.sessionKey])
+
+  useEffect(() => {
+    if (slashMenuOpen) void onRefreshSlashCommands()
+  }, [onRefreshSlashCommands, slashMenuOpen])
+
+  const focusComposerEnd = (next: string): void => {
+    onInput(next)
+    window.requestAnimationFrame(() => {
+      const element = composerRef.current
+      if (!element) return
+      element.focus()
+      element.setSelectionRange(next.length, next.length)
+    })
+  }
+
   const send = async (value = input): Promise<void> => {
-    const message = value.trim()
+    const submission = preparePromptSubmission(value, slashCatalog.commands)
+    const message = submission.message
+    const visibleText = submission.displayText
     if (
       !ready ||
-      (!message && references.length === 0 && attachments.length === 0) ||
+      (!message.trim() && references.length === 0 && attachments.length === 0) ||
       stopping ||
       sending
     )
       return
-    if (busy && message.startsWith('/')) {
-      setError('任务结束后可执行 Slash Command')
+    if (busy && submission.isSlash) {
+      setError(
+        slashCatalog.hasFreshSnapshot
+          ? '任务结束后可执行 Slash Command'
+          : '命令列表不可用，任务结束后再发送'
+      )
       return
     }
     setError(null)
@@ -285,18 +373,19 @@ function Conversation({
       temporarySession && !busy
         ? await window.desktop.createSession(
             promptInput,
-            message.split(/\r?\n/u)[0]?.trim() || '图片会话',
+            visibleText.split(/\r?\n/u)[0]?.trim() || '图片会话',
             temporaryApprovalMode
           )
         : busy
           ? await window.desktop.followUp(promptInput)
           : await window.desktop.prompt(promptInput)
     if (result.ok) {
-      setProjection((current) => appendUserTurn(current, message))
+      setProjection((current) => appendUserTurn(current, visibleText))
       onInput('')
       onSentReferences(references)
       onReferences([])
       onAttachments([])
+      setSlashMenuDismissed(false)
       if (temporarySession && result.data) onSessionCreated(result.data)
     } else setError(result.error.message)
     setSending(false)
@@ -340,6 +429,78 @@ function Conversation({
     ).then((loaded) => onAttachments([...attachments, ...loaded]))
   }
 
+  const slashMenuPanel = slashMenuOpen ? (
+    <div className="slash-menu-panel" data-slot="slash-command-menu">
+      <Command label="Slash 命令">
+        <Command.List className="slash-menu-list">
+          {slashCatalog.stale && (
+            <div className="slash-menu-note">
+              命令列表刷新失败，当前显示上次结果
+            </div>
+          )}
+          {slashCatalog.loading && slashCandidates.length === 0 ? (
+            <div className="slash-menu-empty">正在加载命令…</div>
+          ) : slashCandidates.length > 0 ? (
+            slashMenu?.level === 'command' ? (
+              slashMenu.candidates.map((command, index) => (
+                <Command.Item
+                  className="slash-menu-item"
+                  data-selected={index === slashSelectionIndex}
+                  key={command.name}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onMouseEnter={() => setSlashSelectionIndex(index)}
+                  onSelect={() => focusComposerEnd(fillSlashCommand(command))}
+                  value={command.name}
+                >
+                  <span className="slash-menu-primary">
+                    <span className="truncate">/{command.name}</span>
+                    {command.input?.hint && (
+                      <span className="slash-menu-hint truncate">
+                        {command.input.hint}
+                      </span>
+                    )}
+                  </span>
+                  <span className="slash-menu-description truncate">
+                    {command.description ?? ''}
+                  </span>
+                  <span className="slash-menu-source">{command.source}</span>
+                </Command.Item>
+              ))
+            ) : slashMenu ? (
+              slashMenu.candidates.map((subcommand, index) => (
+                <Command.Item
+                  className="slash-menu-item"
+                  data-selected={index === slashSelectionIndex}
+                  key={subcommand.name}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onMouseEnter={() => setSlashSelectionIndex(index)}
+                  onSelect={() =>
+                    focusComposerEnd(
+                      fillSlashSubcommand(slashMenu.command, subcommand)
+                    )
+                  }
+                  value={subcommand.name}
+                >
+                  <span className="slash-menu-primary">
+                    <span className="truncate">{subcommand.name}</span>
+                  </span>
+                  <span className="slash-menu-description truncate">
+                    {subcommand.usage ?? subcommand.description ?? ''}
+                  </span>
+                  <span className="slash-menu-source">
+                    {slashMenu.command.source}
+                  </span>
+                </Command.Item>
+              ))
+            ) : null
+          ) : slashCatalog.error ? (
+            <div className="slash-menu-empty">{slashCatalog.error}</div>
+          ) : null}
+        </Command.List>
+      </Command>
+    </div>
+  ) : null
+
   const conversation = (
     <main
       className="flex h-full min-w-0 flex-col bg-[var(--surface-main)]"
@@ -348,7 +509,9 @@ function Conversation({
       <header className="flex h-16 shrink-0 items-center border-b border-[var(--border-subtle)] px-7">
         <div>
           <h2 className="text-[15px] font-semibold">
-            {fixture ? fixture.activeConversation : strings.appName}
+            {fixture
+              ? fixture.activeConversation
+              : (runtime.sessionName ?? strings.appName)}
           </h2>
           <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">
             {fixture
@@ -450,52 +613,80 @@ function Conversation({
               ))}
             </div>
           )}
-          {fixture ? (
-            <textarea
-              aria-label="任务输入"
-              className="h-20 w-full resize-none bg-transparent px-2 py-1 text-sm outline-none placeholder:text-[var(--text-muted)] disabled:cursor-not-allowed"
-              disabled={
-                (!ready && !runtime.approvalModeChanging) || stopping || sending
+          {!fixture && slashMenuPanel}
+          <textarea
+            ref={composerRef}
+            aria-label="任务输入"
+            className="h-20 w-full resize-none bg-transparent px-2 py-1 text-sm outline-none placeholder:text-[var(--text-muted)] disabled:cursor-not-allowed"
+            disabled={
+              (!ready && !runtime.approvalModeChanging) || stopping || sending
+            }
+            onChange={(event) => {
+              setSlashMenuDismissed(false)
+              onInput(event.target.value)
+            }}
+            onKeyDown={(event) => {
+              if (slashMenuOpen && event.key === 'Escape') {
+                event.preventDefault()
+                setSlashMenuDismissed(true)
+                return
               }
-              onChange={(event) => onInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (
-                  event.key === 'Enter' &&
-                  !event.shiftKey &&
-                  !event.nativeEvent.isComposing
-                ) {
-                  event.preventDefault()
-                  void send()
-                }
-              }}
-              onPaste={pasteImages}
-              placeholder={strings.composerPlaceholder}
-              value={input}
-            />
-          ) : (
-            <ComposerPrimitive.Input
-              aria-label="任务输入"
-              className="h-20 w-full resize-none bg-transparent px-2 py-1 text-sm outline-none placeholder:text-[var(--text-muted)] disabled:cursor-not-allowed"
-              disabled={
-                (!ready && !runtime.approvalModeChanging) || stopping || sending
+              if (
+                slashMenuOpen &&
+                slashCandidates.length > 0 &&
+                (event.key === 'ArrowDown' || event.key === 'ArrowUp')
+              ) {
+                event.preventDefault()
+                const delta = event.key === 'ArrowDown' ? 1 : -1
+                setSlashSelectionIndex(
+                  (current) =>
+                    (current + delta + slashCandidates.length) %
+                    slashCandidates.length
+                )
+                return
               }
-              onChange={(event) => onInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (
-                  event.key === 'Enter' &&
-                  !event.shiftKey &&
-                  !event.nativeEvent.isComposing
+              if (slashMenuOpen && slashCandidates.length > 0 && event.key === 'Tab') {
+                event.preventDefault()
+                if (slashMenu?.level === 'command' && selectedCommand) {
+                  focusComposerEnd(fillSlashCommand(selectedCommand))
+                } else if (
+                  slashMenu?.level === 'subcommand' &&
+                  selectedSubcommand
                 ) {
-                  event.preventDefault()
-                  void send()
+                  focusComposerEnd(
+                    fillSlashSubcommand(slashMenu.command, selectedSubcommand)
+                  )
                 }
-              }}
-              onPaste={pasteImages}
-              placeholder={strings.composerPlaceholder}
-              submitMode="none"
-              value={input}
-            />
-          )}
+                return
+              }
+              if (
+                event.key === 'Enter' &&
+                !event.shiftKey &&
+                !event.nativeEvent.isComposing
+              ) {
+                event.preventDefault()
+                if (slashMenuOpen && slashCandidates.length > 0 && !slashCatalog.loading) {
+                  if (slashMenu?.level === 'command' && selectedCommand) {
+                    void send(submitSlashCommand(selectedCommand))
+                    return
+                  }
+                  if (slashMenu?.level === 'subcommand' && selectedSubcommand) {
+                    void send(
+                      submitSlashSubcommand(
+                        slashMenu.command,
+                        selectedSubcommand
+                      )
+                    )
+                    return
+                  }
+                }
+                void send()
+              }
+            }}
+            onPaste={pasteImages}
+            placeholder={strings.composerPlaceholder}
+            value={input}
+          />
           <div className="flex items-center justify-between px-1">
             <span className="text-[11px] text-[var(--text-muted)]">
               {error ??
@@ -660,22 +851,34 @@ export function App(): React.JSX.Element {
   const [draftStatus, setDraftStatus] = useState<string | null>(null)
   const [openingSession, setOpeningSession] = useState(false)
   const [openingWorkspace, setOpeningWorkspace] = useState(false)
+  const [slashCatalog, setSlashCatalog] = useState<SlashCatalogState>({
+    commands: [],
+    loading: false,
+    error: null,
+    stale: false,
+    hasFreshSnapshot: false
+  })
   const projectionSessionId = useRef<string | undefined>(undefined)
   const projectionRef = useRef(projection)
   const projectionCache = useRef(new Map<string, ConversationProjection>())
   const attachmentCache = useRef(
     new Map<string, NonNullable<PromptInput['images']>>()
   )
+  const slashCatalogCache = useRef(new Map<string, AvailableSlashCommand[]>())
+  const slashRequest = useRef<Promise<void> | null>(null)
+  const slashRequestKey = useRef<string | undefined>(undefined)
   const sessionRequestId = useRef(0)
   const runtimeReadyRef = useRef(false)
   const activeWorkspaceId = overview.activeWorkspaceId
   const activeWorkspaceIdRef = useRef(activeWorkspaceId)
   const sessionSearchRef = useRef(sessionSearch)
+  const runtimeRef = useRef(runtime)
   const currentProjectionKey = runtimeSessionKey(runtime)
 
   useLayoutEffect(() => {
     projectionRef.current = projection
-  }, [projection])
+    runtimeRef.current = runtime
+  }, [projection, runtime])
 
   useLayoutEffect(() => {
     activeWorkspaceIdRef.current = activeWorkspaceId
@@ -692,6 +895,20 @@ export function App(): React.JSX.Element {
       projectionSessionId.current = nextProjectionId
       setProjection(createConversationProjection())
     }
+    setSlashCatalog((current) => {
+      if (current.sessionKey === nextProjectionId) return current
+      const cached = nextProjectionId
+        ? slashCatalogCache.current.get(nextProjectionId) ?? []
+        : []
+      return {
+        sessionKey: nextProjectionId,
+        commands: cached,
+        loading: false,
+        error: null,
+        stale: false,
+        hasFreshSnapshot: cached.length > 0
+      }
+    })
     setRuntime(snapshot)
   }, [])
 
@@ -756,6 +973,67 @@ export function App(): React.JSX.Element {
     return true
   }, [])
 
+  const refreshSlashCommands = useCallback(async (): Promise<void> => {
+    if (fixture) return
+    const sessionKey = runtimeSessionKey(runtimeRef.current)
+    if (runtimeRef.current.status !== 'ready' || !sessionKey) {
+      setSlashCatalog((current) => ({
+        ...current,
+        sessionKey,
+        loading: false
+      }))
+      return
+    }
+    if (slashRequest.current && slashRequestKey.current === sessionKey) {
+      await slashRequest.current
+      return
+    }
+    const cached = slashCatalogCache.current.get(sessionKey) ?? []
+    setSlashCatalog({
+      sessionKey,
+      commands: cached,
+      loading: true,
+      error: null,
+      stale: false,
+      hasFreshSnapshot: cached.length > 0
+    })
+    const request = window.desktop
+      .getAvailableCommands()
+      .then((result) => {
+        if (slashRequestKey.current !== sessionKey) return
+        if (result.ok) {
+          slashCatalogCache.current.set(sessionKey, result.data)
+          setSlashCatalog({
+            sessionKey,
+            commands: result.data,
+            loading: false,
+            error: null,
+            stale: false,
+            hasFreshSnapshot: true
+          })
+          return
+        }
+        const previous = slashCatalogCache.current.get(sessionKey) ?? []
+        setSlashCatalog({
+          sessionKey,
+          commands: previous,
+          loading: false,
+          error: result.error.message,
+          stale: previous.length > 0,
+          hasFreshSnapshot: previous.length > 0
+        })
+      })
+      .finally(() => {
+        if (slashRequestKey.current === sessionKey) {
+          slashRequest.current = null
+          slashRequestKey.current = undefined
+        }
+      })
+    slashRequest.current = request
+    slashRequestKey.current = sessionKey
+    await request
+  }, [])
+
   const refreshCatalogWhenReady = useCallback(
     (snapshot: RuntimeSnapshot): void => {
       if (snapshot.status !== 'ready') {
@@ -815,8 +1093,43 @@ export function App(): React.JSX.Element {
           )
           return
         }
+        if (ompEvent.type === 'available_commands_update') {
+          const sessionKey = runtimeSessionKey(runtimeRef.current)
+          if (!sessionKey) return
+          const commands = validateAvailableCommands(ompEvent)
+          if (!commands) {
+            window.desktop.log({
+              level: 'error',
+              message: 'OMP 返回了无效命令目录快照'
+            })
+            const previous = slashCatalogCache.current.get(sessionKey) ?? []
+            setSlashCatalog({
+              sessionKey,
+              commands: previous,
+              loading: false,
+              error: '命令列表刷新失败',
+              stale: previous.length > 0,
+              hasFreshSnapshot: previous.length > 0
+            })
+            return
+          }
+          slashCatalogCache.current.set(sessionKey, commands)
+          setSlashCatalog({
+            sessionKey,
+            commands,
+            loading: false,
+            error: null,
+            stale: false,
+            hasFreshSnapshot: true
+          })
+          return
+        }
         const workspaceId = activeWorkspaceIdRef.current
-        if (ompEvent.type === 'agent_end' && workspaceId) {
+        if (
+          (ompEvent.type === 'agent_end' ||
+            ompEvent.type === 'session_info_update') &&
+          workspaceId
+        ) {
           void refreshSessions(workspaceId, 0, sessionSearchRef.current)
         }
         if (!knownOmpEventTypes.has(ompEvent.type)) {
@@ -844,6 +1157,12 @@ export function App(): React.JSX.Element {
     refreshWorkspaces,
     updateComposer
   ])
+
+  useEffect(() => {
+    if (runtime.status === 'ready' && runtime.workspacePath && runtime.sessionId) {
+      void refreshSlashCommands()
+    }
+  }, [refreshSlashCommands, runtime.sessionId, runtime.status, runtime.workspacePath])
 
   useEffect(() => {
     if (!activeWorkspaceId || fixture) return
@@ -1235,6 +1554,8 @@ export function App(): React.JSX.Element {
             }}
             attachments={attachments}
             onAttachments={setAttachments}
+            slashCatalog={slashCatalog}
+            onRefreshSlashCommands={refreshSlashCommands}
           />
         </Panel>
       </Group>
