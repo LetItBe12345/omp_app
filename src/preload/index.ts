@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   DesktopApi,
   ExtensionUiResponse,
@@ -19,6 +19,50 @@ const desktopApi: DesktopApi = {
     ipcRenderer.invoke(IPC_CHANNELS.setWorkspacePinned, workspaceId, pinned),
   removeWorkspace: (workspaceId) =>
     ipcRenderer.invoke(IPC_CHANNELS.removeWorkspace, workspaceId),
+  listWorkspaceEntries: (
+    workspaceId,
+    relativeDirectory,
+    offset,
+    revision,
+    priority
+  ) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.listWorkspaceEntries,
+      workspaceId,
+      relativeDirectory,
+      offset,
+      revision,
+      priority
+    ),
+  searchWorkspaceEntries: (workspaceId, query) =>
+    ipcRenderer.invoke(IPC_CHANNELS.searchWorkspaceEntries, workspaceId, query),
+  watchWorkspaceDirectories: (workspaceId, relativeDirectories) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.watchWorkspaceDirectories,
+      workspaceId,
+      relativeDirectories
+    ),
+  refreshWorkspaceDirectories: (workspaceId, relativeDirectories) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.refreshWorkspaceDirectories,
+      workspaceId,
+      relativeDirectories
+    ),
+  openWorkspaceEntry: (workspaceId, relativePath) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.openWorkspaceEntry,
+      workspaceId,
+      relativePath
+    ),
+  onWorkspaceFilesEvent: (listener) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      value: Parameters<typeof listener>[0]
+    ) => listener(value)
+    ipcRenderer.on(IPC_CHANNELS.workspaceFilesEvent, handler)
+    return () =>
+      ipcRenderer.removeListener(IPC_CHANNELS.workspaceFilesEvent, handler)
+  },
   listSessions: (workspaceId, offset, query) =>
     ipcRenderer.invoke(IPC_CHANNELS.listSessions, workspaceId, offset, query),
   setSessionPinned: (workspaceId, sessionId, pinned) =>
@@ -46,6 +90,28 @@ const desktopApi: DesktopApi = {
     ipcRenderer.invoke(IPC_CHANNELS.deleteSession, workspaceId, sessionId),
   getContextCandidates: (workspaceId, query) =>
     ipcRenderer.invoke(IPC_CHANNELS.getContextCandidates, workspaceId, query),
+  resolveDroppedFiles: (workspaceId, files) => {
+    const paths = files.map((file) => {
+      try {
+        return webUtils.getPathForFile(
+          file as Parameters<typeof webUtils.getPathForFile>[0]
+        )
+      } catch {
+        return ''
+      }
+    })
+    return ipcRenderer.invoke(
+      IPC_CHANNELS.resolveDroppedPaths,
+      workspaceId,
+      paths
+    )
+  },
+  resolveWorkspaceReferences: (workspaceId, references) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.resolveWorkspaceReferences,
+      workspaceId,
+      references
+    ),
   cancelPendingModelSelection: () =>
     ipcRenderer.invoke(IPC_CHANNELS.cancelPendingModelSelection),
   cancelProviderLogin: () =>
@@ -80,6 +146,8 @@ const desktopApi: DesktopApi = {
   respondExtensionUi: (id: string, response: ExtensionUiResponse) =>
     ipcRenderer.invoke(IPC_CHANNELS.respondExtensionUi, id, response),
   revealPath: (path) => ipcRenderer.invoke(IPC_CHANNELS.revealPath, path),
+  validateLocalPath: (path) =>
+    ipcRenderer.invoke(IPC_CHANNELS.validateLocalPath, path),
   selectModel: (selection) =>
     ipcRenderer.invoke(IPC_CHANNELS.selectModel, selection),
   setThinkingLevel: (level) =>

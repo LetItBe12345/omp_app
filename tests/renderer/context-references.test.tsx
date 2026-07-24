@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { CONTEXT_REFERENCE_MIME } from '../../src/renderer/context-drag'
 import { ContextReferences } from '../../src/renderer/context-references'
 
 describe('ContextReferences', () => {
@@ -62,5 +63,113 @@ describe('ContextReferences', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: '移除 README.md' }))
     await waitFor(() => expect(onReferences).toHaveBeenLastCalledWith([]))
+  })
+
+  it('接收文件树拖拽并复用引用去重逻辑', async () => {
+    const onReferences = vi.fn()
+    const { container } = render(
+      <ContextReferences
+        input=""
+        onInput={vi.fn()}
+        onReferences={onReferences}
+        recentReferences={[]}
+        references={[
+          {
+            id: 'file:README.md',
+            kind: 'file',
+            name: 'README.md',
+            relativePath: 'README.md'
+          }
+        ]}
+        workspaceId="workspace"
+      />
+    )
+    const transfer = {
+      types: [CONTEXT_REFERENCE_MIME],
+      files: [],
+      dropEffect: 'none',
+      getData: (type: string) =>
+        type === CONTEXT_REFERENCE_MIME
+          ? JSON.stringify({
+              workspaceId: 'workspace',
+              id: 'folder:src',
+              kind: 'folder',
+              name: 'src',
+              relativePath: 'src'
+            })
+          : ''
+    }
+
+    fireEvent.dragEnter(container, { dataTransfer: transfer })
+    expect(screen.queryByText('松开以引用文件或文件夹')).not.toBeInTheDocument()
+    fireEvent.drop(container, { dataTransfer: transfer })
+
+    await waitFor(() =>
+      expect(onReferences).toHaveBeenCalledWith([
+        expect.objectContaining({ id: 'file:README.md' }),
+        expect.objectContaining({ id: 'folder:src' })
+      ])
+    )
+  })
+
+  it('把系统文件管理器拖入的多个文件转换为引用', async () => {
+    vi.mocked(window.desktop.resolveDroppedFiles).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        references: [
+          {
+            id: 'file:README.md',
+            kind: 'file',
+            name: 'README.md',
+            relativePath: 'README.md'
+          },
+          {
+            id: 'folder:src',
+            kind: 'folder',
+            name: 'src',
+            relativePath: 'src'
+          }
+        ],
+        rejectedCount: 1
+      }
+    })
+    const onReferences = vi.fn()
+    const { container } = render(
+      <ContextReferences
+        input=""
+        onInput={vi.fn()}
+        onReferences={onReferences}
+        recentReferences={[]}
+        references={[]}
+        workspaceId="workspace"
+      />
+    )
+    const files = [
+      new File(['readme'], 'README.md'),
+      new File(['source'], 'src'),
+      new File(['outside'], 'outside.txt')
+    ]
+    const transfer = {
+      types: ['Files'],
+      files,
+      dropEffect: 'none',
+      getData: () => ''
+    }
+
+    fireEvent.drop(container, { dataTransfer: transfer })
+
+    await waitFor(() =>
+      expect(window.desktop.resolveDroppedFiles).toHaveBeenCalledWith(
+        'workspace',
+        files
+      )
+    )
+    expect(onReferences).toHaveBeenCalledWith([
+      expect.objectContaining({ relativePath: 'README.md' }),
+      expect.objectContaining({ relativePath: 'src' })
+    ])
+    expect(
+      await screen.findByText('已加入 2 项，另有 1 项不在当前 Workspace')
+    ).toBeInTheDocument()
   })
 })

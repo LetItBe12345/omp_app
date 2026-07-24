@@ -6,8 +6,9 @@ import {
   type IpcMainInvokeEvent
 } from 'electron'
 import { stat } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { performance } from 'node:perf_hooks'
-import { dirname, isAbsolute, relative, sep } from 'node:path'
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type {
   ApprovalMode,
   DesktopResult,
@@ -47,6 +48,36 @@ type WindowGetter = () => BrowserWindow | null
 
 function success<T>(data: T): DesktopResult<T> {
   return { ok: true, data }
+}
+
+export async function resolveLocalPathValue(
+  value: unknown,
+  workspacePath: string
+): Promise<{ path: string; directory: boolean } | null> {
+  if (typeof value !== 'string' || value.includes('\0')) return null
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(value.trim())
+  } catch {
+    return null
+  }
+  if (!decoded) return null
+  const candidates = [
+    decoded,
+    decoded.replace(/#L\d+(?:C\d+)?$/u, ''),
+    decoded.replace(/:\d+(?::\d+)?$/u, '')
+  ]
+  for (const candidate of [...new Set(candidates)]) {
+    const path = candidate.startsWith('~/')
+      ? resolve(homedir(), candidate.slice(2))
+      : isAbsolute(candidate)
+        ? candidate
+        : resolve(workspacePath, candidate)
+    const entry = await stat(path).catch(() => null)
+    if (!entry || (!entry.isFile() && !entry.isDirectory())) continue
+    return { path, directory: entry.isDirectory() }
+  }
+  return null
 }
 
 function runtimeError(error: unknown): RuntimeError {
@@ -308,7 +339,8 @@ export function registerRuntimeIpc(
     IPC_CHANNELS.setThinkingLevel,
     IPC_CHANNELS.setApprovalMode,
     IPC_CHANNELS.respondExtensionUi,
-    IPC_CHANNELS.revealPath
+    IPC_CHANNELS.revealPath,
+    IPC_CHANNELS.validateLocalPath
   ]
 
   const send = (event: RuntimeEvent): void => {
@@ -1952,21 +1984,35 @@ export function registerRuntimeIpc(
     }
   )
 
+  const resolveLocalPath = async (
+    value: unknown
+  ): Promise<{ path: string; directory: boolean } | null> =>
+    resolveLocalPathValue(value, activeWorkspace().path)
+
+  ipcMain.handle(
+    IPC_CHANNELS.validateLocalPath,
+    async (event, value: unknown) => {
+      try {
+        assertTrustedSender(event, getWindow, developmentUrl)
+        return (await resolveLocalPath(value)) !== null
+      } catch {
+        return false
+      }
+    }
+  )
+
   ipcMain.handle(IPC_CHANNELS.revealPath, async (event, value: unknown) => {
     try {
       assertTrustedSender(event, getWindow, developmentUrl)
-      if (typeof value !== 'string' || !isAbsolute(value)) {
+      const target = await resolveLocalPath(value)
+      if (!target) {
         throw new RuntimeFailure('INVALID_ARGUMENT', '本地路径无效', false)
       }
-      const entry = await stat(value).catch(() => null)
-      if (!entry) {
-        throw new RuntimeFailure('INVALID_ARGUMENT', '本地路径不存在', false)
-      }
-      if (entry.isDirectory()) {
-        const error = await shell.openPath(value)
+      if (target.directory) {
+        const error = await shell.openPath(target.path)
         if (error) throw new Error(error)
       } else {
-        shell.showItemInFolder(value)
+        shell.showItemInFolder(target.path)
       }
       return success(true)
     } catch (error) {

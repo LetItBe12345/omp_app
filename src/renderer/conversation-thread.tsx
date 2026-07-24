@@ -607,6 +607,112 @@ function Interaction({
   )
 }
 
+function ControlledMarkdownLink({
+  href,
+  children
+}: {
+  href?: string
+  children?: ReactNode
+}): React.JSX.Element {
+  const external = href ? /^https?:\/\//iu.test(href) : false
+  const [validLocal, setValidLocal] = useState(false)
+  useEffect(() => {
+    if (!href || external) {
+      queueMicrotask(() => setValidLocal(false))
+      return
+    }
+    let cancelled = false
+    void window.desktop.validateLocalPath(href).then((valid) => {
+      if (!cancelled) setValidLocal(valid)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [external, href])
+
+  const open = (): void => {
+    if (!href) return
+    if (external) void window.desktop.openExternal(href)
+    else if (validLocal) void window.desktop.revealPath(href)
+  }
+  const interactive = external || validLocal
+  return (
+    <a
+      aria-label={interactive && href ? `Ctrl+Enter 打开 ${href}` : undefined}
+      href={href}
+      onClick={(event) => {
+        event.preventDefault()
+        if (interactive && (event.ctrlKey || event.metaKey)) open()
+      }}
+      onKeyDown={(event) => {
+        if (
+          interactive &&
+          event.key === 'Enter' &&
+          (event.ctrlKey || event.metaKey)
+        ) {
+          event.preventDefault()
+          open()
+        }
+      }}
+      rel="noreferrer"
+      tabIndex={interactive ? 0 : -1}
+      title={interactive ? 'Ctrl+点击打开' : undefined}
+    >
+      {children}
+    </a>
+  )
+}
+
+const CodeBlockContext = createContext(false)
+
+function InlinePathCode({
+  children,
+  ...props
+}: React.HTMLAttributes<HTMLElement>): React.JSX.Element {
+  const block = useContext(CodeBlockContext)
+  const value =
+    typeof children === 'string'
+      ? children
+      : Array.isArray(children)
+        ? children.join('')
+        : ''
+  const [valid, setValid] = useState(false)
+  useEffect(() => {
+    if (block || !value || value.includes('\n')) {
+      queueMicrotask(() => setValid(false))
+      return
+    }
+    let cancelled = false
+    void window.desktop.validateLocalPath(value).then((result) => {
+      if (!cancelled) setValid(result)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [block, value])
+  if (!valid || block) return <code {...props}>{children}</code>
+  return (
+    <a
+      aria-label={`Ctrl+Enter 打开 ${value}`}
+      href={value}
+      onClick={(event) => {
+        event.preventDefault()
+        if (event.ctrlKey || event.metaKey)
+          void window.desktop.revealPath(value)
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+          event.preventDefault()
+          void window.desktop.revealPath(value)
+        }
+      }}
+      title="Ctrl+点击打开"
+    >
+      <code {...props}>{children}</code>
+    </a>
+  )
+}
+
 const markdownComponents = {
   a: ({
     href,
@@ -615,27 +721,26 @@ const markdownComponents = {
     href?: string
     children?: ReactNode
   }): React.JSX.Element => (
-    <a
-      href={href}
-      onClick={(event) => {
-        event.preventDefault()
-        if (href) void window.desktop.openExternal(href)
-      }}
-      rel="noreferrer"
-    >
-      {children}
-    </a>
+    <ControlledMarkdownLink href={href}>{children}</ControlledMarkdownLink>
   ),
   img: ({ src, alt }: { src?: string; alt?: string }): React.JSX.Element => (
-    <a
-      href={src}
-      onClick={(event) => {
-        event.preventDefault()
-        if (src) void window.desktop.openExternal(src)
-      }}
-    >
+    <ControlledMarkdownLink href={src}>
       {alt || '远程图片'}
-    </a>
+    </ControlledMarkdownLink>
+  ),
+  pre: ({
+    children,
+    ...props
+  }: React.HTMLAttributes<HTMLPreElement>): React.JSX.Element => (
+    <CodeBlockContext.Provider value>
+      <pre {...props}>{children}</pre>
+    </CodeBlockContext.Provider>
+  ),
+  code: ({
+    children,
+    ...props
+  }: React.HTMLAttributes<HTMLElement>): React.JSX.Element => (
+    <InlinePathCode {...props}>{children}</InlinePathCode>
   )
 }
 
