@@ -68,6 +68,28 @@ describe('RuntimeSupervisor', () => {
     })
   })
 
+  it('agent_end 先于 prompt 响应时保持空闲状态', async () => {
+    await supervisor.start(process.cwd())
+
+    await supervisor.prompt({ message: 'complete-before-response' })
+
+    expect(supervisor.snapshot).toMatchObject({
+      isStreaming: false,
+      queuedMessageCount: 0
+    })
+  })
+
+  it('本地 Prompt 未启动 Agent 时恢复空闲状态', async () => {
+    await supervisor.start(process.cwd())
+
+    await supervisor.prompt({ message: 'local-only' })
+
+    expect(supervisor.snapshot).toMatchObject({
+      isStreaming: false,
+      queuedMessageCount: 0
+    })
+  })
+
   it('请求超时后返回稳定错误码', async () => {
     await supervisor.start(process.cwd())
 
@@ -163,10 +185,30 @@ describe('RuntimeSupervisor', () => {
     await supervisor.start(process.cwd())
 
     await expect(supervisor.getLoginProviders()).resolves.toEqual([
-      { id: 'test', name: 'Test Provider', available: true },
-      { id: 'browser', name: 'Browser Login', available: true },
-      { id: 'terminal-only', name: 'Terminal Only', available: true },
-      { id: 'disabled', name: 'Disabled Provider', available: false }
+      {
+        id: 'test',
+        name: 'Test Provider',
+        available: true,
+        authenticated: true
+      },
+      {
+        id: 'browser',
+        name: 'Browser Login',
+        available: true,
+        authenticated: false
+      },
+      {
+        id: 'terminal-only',
+        name: 'Terminal Only',
+        available: true,
+        authenticated: false
+      },
+      {
+        id: 'disabled',
+        name: 'Disabled Provider',
+        available: false,
+        authenticated: false
+      }
     ])
     await expect(supervisor.getAvailableModels()).resolves.toEqual([
       {

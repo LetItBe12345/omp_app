@@ -197,6 +197,20 @@ describe('App shell', () => {
   })
 
   it('新建按钮先打开临时输入，首条发送时才创建真实 Session', async () => {
+    const createdSession = {
+      id: 'new-session',
+      workspaceId: 'workspace-1',
+      path: '/tmp/new-session.jsonl',
+      title: '第一条消息',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      modifiedAt: '2026-01-01T00:00:00.000Z',
+      messageCount: 1,
+      size: 1,
+      pinned: false,
+      archived: false,
+      compatibility: 'v3' as const,
+      status: 'pending' as const
+    }
     vi.mocked(window.desktop.getWorkspaces).mockResolvedValueOnce({
       ok: true,
       data: {
@@ -225,6 +239,17 @@ describe('App shell', () => {
         queuedMessageCount: 0
       }
     })
+    vi.mocked(window.desktop.listSessions).mockImplementation(async () => ({
+      ok: true,
+      data: {
+        sessions:
+          vi.mocked(window.desktop.createSession).mock.calls.length > 0
+            ? [createdSession]
+            : [],
+        hasMore: false,
+        nextOffset: 0
+      }
+    }))
     render(<App />)
 
     const newButton = await screen.findByRole('button', { name: '新建对话' })
@@ -242,5 +267,6 @@ describe('App shell', () => {
         '第一条消息'
       )
     )
+    expect(await screen.findByText('第一条消息')).toBeInTheDocument()
   })
 })

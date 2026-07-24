@@ -244,13 +244,15 @@ export class RuntimeSupervisor extends EventEmitter {
       const id = value['id']
       const name = value['name']
       const available = value['available']
+      const authenticated = value['authenticated']
       if (
         typeof id !== 'string' ||
         typeof name !== 'string' ||
-        typeof available !== 'boolean'
+        typeof available !== 'boolean' ||
+        typeof authenticated !== 'boolean'
       )
         return []
-      return [{ id, name, available }]
+      return [{ id, name, available, authenticated }]
     })
   }
 
@@ -338,11 +340,22 @@ export class RuntimeSupervisor extends EventEmitter {
       return
     }
     this.#activeInput = structuredClone(input)
+    this.#setSnapshot({ isStreaming: true })
     try {
-      await this.request({ type: 'prompt', ...input }, STATE_TIMEOUT_MS)
-      this.#setSnapshot({ isStreaming: true })
+      const response = await this.request(
+        { type: 'prompt', ...input },
+        STATE_TIMEOUT_MS
+      )
+      const data = isRecord(response.data) ? response.data : {}
+      if (data['agentInvoked'] === false) {
+        this.#activeInput = null
+        this.#setSnapshot({ isStreaming: false })
+        if (!this.#stoppingCurrentRun)
+          void this.#applyPendingModelSelectionSafely()
+      }
     } catch (error) {
       this.#activeInput = null
+      this.#setSnapshot({ isStreaming: false })
       throw error
     }
   }

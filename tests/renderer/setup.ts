@@ -70,11 +70,27 @@ if (typeof window !== 'undefined') {
       createSession: vi.fn().mockResolvedValue({
         ok: true,
         data: {
-          status: 'ready',
-          workspacePath: '/tmp/workspace',
-          sessionId: 'new-session',
-          isStreaming: true,
-          queuedMessageCount: 0
+          snapshot: {
+            status: 'ready',
+            workspacePath: '/tmp/workspace',
+            sessionId: 'new-session',
+            isStreaming: true,
+            queuedMessageCount: 0
+          },
+          session: {
+            id: 'new-session',
+            workspaceId: 'workspace-1',
+            path: '/tmp/new-session.jsonl',
+            title: '第一条消息',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            modifiedAt: '2026-01-01T00:00:00.000Z',
+            messageCount: 1,
+            size: 1,
+            pinned: false,
+            archived: false,
+            compatibility: 'v3',
+            status: 'pending'
+          }
         }
       }),
       onRuntimeEvent: vi.fn().mockReturnValue(vi.fn()),

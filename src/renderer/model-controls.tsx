@@ -449,7 +449,7 @@ function ProviderLoginDialog({
                 {providers.map((provider) => (
                   <Command.Item
                     className="command-item mb-1"
-                    disabled={!provider.available}
+                    disabled={!provider.available || provider.authenticated}
                     key={provider.id}
                     onSelect={() => void startLogin(provider.id)}
                     value={`${provider.name} ${provider.id}`}
@@ -460,11 +460,15 @@ function ProviderLoginDialog({
                         {provider.id}
                       </p>
                     </div>
-                    {!provider.available && (
+                    {provider.authenticated ? (
+                      <span className="text-[11px] text-emerald-700">
+                        已登录
+                      </span>
+                    ) : !provider.available ? (
                       <span className="text-[11px] text-[var(--text-muted)]">
                         当前不可用
                       </span>
-                    )}
+                    ) : null}
                   </Command.Item>
                 ))}
               </Command.List>

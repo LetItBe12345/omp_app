@@ -19,6 +19,7 @@ import { uiFixture } from '../../tests/fixtures/ui-fixture'
 import type {
   AvailableModel,
   ContextReference,
+  CreatedSession,
   LoginProvider,
   ProviderLoginState,
   PromptInput,
@@ -194,7 +195,7 @@ function Conversation({
   references: ContextReference[]
   onReferences: (references: ContextReference[]) => void
   temporarySession: boolean
-  onSessionCreated: (snapshot: RuntimeSnapshot) => void
+  onSessionCreated: (created: CreatedSession) => void
   openingSession: boolean
   recentReferences: ContextReference[]
   onSentReferences: (references: ContextReference[]) => void
@@ -290,8 +291,7 @@ function Conversation({
       onSentReferences(references)
       onReferences([])
       onAttachments([])
-      if (temporarySession && result.data)
-        onSessionCreated(result.data as RuntimeSnapshot)
+      if (temporarySession && result.data) onSessionCreated(result.data)
     } else setError(result.error.message)
     setSending(false)
   }
@@ -646,11 +646,18 @@ export function App(): React.JSX.Element {
   )
   const sessionRequestId = useRef(0)
   const activeWorkspaceId = overview.activeWorkspaceId
+  const activeWorkspaceIdRef = useRef(activeWorkspaceId)
+  const sessionSearchRef = useRef(sessionSearch)
   const currentProjectionKey = runtimeSessionKey(runtime)
 
   useLayoutEffect(() => {
     projectionRef.current = projection
   }, [projection])
+
+  useLayoutEffect(() => {
+    activeWorkspaceIdRef.current = activeWorkspaceId
+    sessionSearchRef.current = sessionSearch
+  }, [activeWorkspaceId, sessionSearch])
 
   const updateComposer = useCallback((value: string): void => {
     setComposerInput(value)
@@ -769,6 +776,10 @@ export function App(): React.JSX.Element {
           )
           return
         }
+        const workspaceId = activeWorkspaceIdRef.current
+        if (ompEvent.type === 'agent_end' && workspaceId) {
+          void refreshSessions(workspaceId, 0, sessionSearchRef.current)
+        }
         if (!knownOmpEventTypes.has(ompEvent.type)) {
           window.desktop.log({
             level: 'debug',
@@ -791,6 +802,7 @@ export function App(): React.JSX.Element {
     applySnapshot,
     refreshModels,
     refreshProviders,
+    refreshSessions,
     refreshWorkspaces,
     updateComposer
   ])
@@ -1128,11 +1140,14 @@ export function App(): React.JSX.Element {
             references={references}
             onReferences={setReferences}
             temporarySession={temporarySession}
-            onSessionCreated={(snapshot) => {
+            onSessionCreated={({ snapshot, session }) => {
               setTemporarySession(false)
               applySnapshot(snapshot)
-              if (activeWorkspaceId)
-                void refreshSessions(activeWorkspaceId, 0, sessionSearch)
+              sessionRequestId.current += 1
+              setSessions((current) => [
+                session,
+                ...current.filter((item) => item.id !== session.id)
+              ])
             }}
             openingSession={openingSession}
             recentReferences={recentReferences}
