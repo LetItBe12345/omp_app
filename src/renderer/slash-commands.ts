@@ -49,7 +49,9 @@ function rankedCommands(
   commands: readonly AvailableSlashCommand[],
   token: string
 ): AvailableSlashCommand[] {
-  const matches = commands.filter((command) => prefixMatchesCommand(command, token))
+  const matches = commands.filter((command) =>
+    prefixMatchesCommand(command, token)
+  )
   const exact = matches.filter((command) => exactMatchesCommand(command, token))
   return exact.length > 0
     ? [...exact, ...matches.filter((command) => !exact.includes(command))]
@@ -86,7 +88,8 @@ function parseLeadingSlashInput(input: string): {
   const body = trimmed.slice(1)
   const firstSpaceIndex = body.search(/\s/u)
   const firstToken = firstSpaceIndex < 0 ? body : body.slice(0, firstSpaceIndex)
-  const restAfterFirstToken = firstSpaceIndex < 0 ? '' : body.slice(firstSpaceIndex)
+  const restAfterFirstToken =
+    firstSpaceIndex < 0 ? '' : body.slice(firstSpaceIndex)
   return {
     leadingWhitespace,
     trimmed,
@@ -148,7 +151,8 @@ export function validateAvailableCommands(
       ...(typeof command['description'] === 'string'
         ? { description: command['description'] }
         : {}),
-      ...(isRecord(command['input']) && typeof command['input']['hint'] === 'string'
+      ...(isRecord(command['input']) &&
+      typeof command['input']['hint'] === 'string'
         ? { input: { hint: command['input']['hint'] } }
         : {}),
       ...(Array.isArray(command['subcommands'])
@@ -172,7 +176,7 @@ export function validateAvailableCommands(
             }))
           }
         : {}),
-      source: command['source']
+      source: command['source'] as AvailableSlashCommand['source']
     } satisfies AvailableSlashCommand
   })
   return commands.every((command) => command !== null)
@@ -259,7 +263,9 @@ export function getSlashMenuModel(
     .slice(parsed.firstSpaceIndex + 1)
   const secondSpaceIndex = subcommandText.search(/\s/u)
   const secondToken =
-    secondSpaceIndex < 0 ? subcommandText : subcommandText.slice(0, secondSpaceIndex)
+    secondSpaceIndex < 0
+      ? subcommandText
+      : subcommandText.slice(0, secondSpaceIndex)
   const secondTokenStart = firstTokenEnd + 1
   const secondTokenEnd = secondTokenStart + secondToken.length
   if (caret < secondTokenStart || caret > secondTokenEnd) return null

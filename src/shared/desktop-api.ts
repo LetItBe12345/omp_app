@@ -92,12 +92,7 @@ export type AvailableModel = {
 }
 
 export type AvailableSlashCommandSource =
-  | 'builtin'
-  | 'skill'
-  | 'extension'
-  | 'custom'
-  | 'mcp_prompt'
-  | 'file'
+  'builtin' | 'skill' | 'extension' | 'custom' | 'mcp_prompt' | 'file'
 
 export type AvailableSlashSubcommand = {
   name: string

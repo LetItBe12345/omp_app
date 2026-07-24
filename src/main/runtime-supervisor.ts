@@ -154,7 +154,10 @@ function parseAvailableSlashCommand(
       ? undefined
       : Array.isArray(value['subcommands'])
         ? value['subcommands'].map((subcommand) => {
-            if (!isRecord(subcommand) || typeof subcommand['name'] !== 'string') {
+            if (
+              !isRecord(subcommand) ||
+              typeof subcommand['name'] !== 'string'
+            ) {
               return null
             }
             if (
@@ -197,11 +200,13 @@ function parseAvailableSlashCommand(
           )
         }
       : {}),
-    source: value['source']
+    source: value['source'] as AvailableSlashCommand['source']
   }
 }
 
-function parseAvailableCommandsPayload(value: unknown): AvailableSlashCommand[] {
+function parseAvailableCommandsPayload(
+  value: unknown
+): AvailableSlashCommand[] {
   const data = isRecord(value) ? value : {}
   if (!Array.isArray(data['commands'])) {
     throw new RuntimeFailure('PROTOCOL_ERROR', 'OMP 返回了无效命令目录', true)
@@ -1060,7 +1065,11 @@ export class RuntimeSupervisor extends EventEmitter {
             ? event['title']
             : this.#snapshot.sessionName
       })
-      if (nextSessionId && previousSessionId && nextSessionId !== previousSessionId)
+      if (
+        nextSessionId &&
+        previousSessionId &&
+        nextSessionId !== previousSessionId
+      )
         void this.getState().catch(() => undefined)
     }
   }

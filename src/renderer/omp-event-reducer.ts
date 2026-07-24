@@ -156,11 +156,13 @@ function normalizeToolName(value: unknown): string {
   return typeof value === 'string' && value.trim() ? value.trim() : '工具'
 }
 
+const ANSI_PATTERN = new RegExp(
+  String.raw`\u001B(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007\u001B]*(?:\u0007|\u001B\\))`,
+  'gu'
+)
+
 function stripAnsi(value: string): string {
-  return value.replace(
-    /[\u001B\u009B][[\]()#;?]*(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-ntqry=><~]|(?:[^\u0007\u001B]*)(?:\u0007|\u001B\\))/gu,
-    ''
-  )
+  return value.replace(ANSI_PATTERN, '')
 }
 
 export function classifyAction(toolName: string): ActionCategory {
