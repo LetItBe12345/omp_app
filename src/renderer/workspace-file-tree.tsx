@@ -217,14 +217,31 @@ function WorkspaceFileTree({
   )
 }
 
+function useFileTreeTarget(): HTMLElement | null {
+  const [target, setTarget] = useState<HTMLElement | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setTarget(
+          document.querySelector<HTMLElement>('[data-slot="file-tree"]')
+        )
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  return target
+}
+
 export function WorkspaceFileTreePortal({
   workspaceId
 }: {
   workspaceId?: string
 }): React.JSX.Element | null {
-  if (!workspaceId) return null
-  const target = document.querySelector<HTMLElement>('[data-slot="file-tree"]')
-  if (!target) return null
+  const target = useFileTreeTarget()
+  if (!workspaceId || !target) return null
   return createPortal(
     <>
       <style>{`
