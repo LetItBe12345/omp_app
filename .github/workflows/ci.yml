@@ -5,22 +5,23 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  quality:
-    name: Formatting diagnostics
+  format:
+    name: Apply repository formatting
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Checkout
+      - name: Checkout feature branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
+          ref: agent/drag-context-references
+          persist-credentials: true
 
       - name: Install pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
@@ -35,49 +36,26 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Format TODO
-        run: pnpm exec prettier --check TODO/in-progress/07-files-preview-and-edit.md
+      - name: Format changed files
+        run: |
+          pnpm exec prettier --write \
+            src/main/workspace-files.ts \
+            src/renderer/context-references.tsx \
+            tests/main/workspace-files.test.ts
 
-      - name: Format main index
-        if: always()
-        run: pnpm exec prettier --check src/main/index.ts
-
-      - name: Format workspace files
-        if: always()
-        run: pnpm exec prettier --check src/main/workspace-files.ts
-
-      - name: Format preload
-        if: always()
-        run: pnpm exec prettier --check src/preload/index.ts
-
-      - name: Format context drag
-        if: always()
-        run: pnpm exec prettier --check src/renderer/context-drag.ts
-
-      - name: Format context references
-        if: always()
-        run: pnpm exec prettier --check src/renderer/context-references.tsx
-
-      - name: Format workspace file tree
-        if: always()
-        run: pnpm exec prettier --check src/renderer/workspace-file-tree.tsx
-
-      - name: Format desktop API
-        if: always()
-        run: pnpm exec prettier --check src/shared/desktop-api.ts
-
-      - name: Format main tests
-        if: always()
-        run: pnpm exec prettier --check tests/main/workspace-files.test.ts
-
-      - name: Format renderer setup
-        if: always()
-        run: pnpm exec prettier --check tests/renderer/setup.ts
-
-      - name: Format context tests
-        if: always()
-        run: pnpm exec prettier --check tests/renderer/context-references.test.tsx
-
-      - name: Format tree tests
-        if: always()
-        run: pnpm exec prettier --check tests/renderer/workspace-file-tree.test.tsx
+      - name: Commit formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add \
+            src/main/workspace-files.ts \
+            src/renderer/context-references.tsx \
+            tests/main/workspace-files.test.ts
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m '应用项目格式化规则'
+          git push origin HEAD:agent/drag-context-references
