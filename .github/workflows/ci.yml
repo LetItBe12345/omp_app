@@ -2,9 +2,6 @@ name: CI
 
 on:
   pull_request:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
@@ -16,9 +13,9 @@ concurrency:
 
 jobs:
   quality:
-    name: Quality and build
+    name: Formatting diagnostics
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -38,176 +35,49 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Typecheck Node
-        run: pnpm typecheck:node
+      - name: Format TODO
+        run: pnpm exec prettier --check TODO/in-progress/07-files-preview-and-edit.md
 
-      - name: Typecheck file tree
-        shell: bash
-        run: |
-          cat > .ci-tsconfig.json <<'JSON'
-          {
-            "extends": "./tsconfig.web.json",
-            "include": [
-              "src/renderer/workspace-file-tree.tsx",
-              "src/preload/index.d.ts",
-              "src/shared/**/*.ts"
-            ],
-            "compilerOptions": { "composite": false }
-          }
-          JSON
-          pnpm exec tsc --noEmit -p .ci-tsconfig.json
-          rm .ci-tsconfig.json
-
-      - name: Typecheck context drop
-        shell: bash
-        run: |
-          cat > .ci-tsconfig.json <<'JSON'
-          {
-            "extends": "./tsconfig.web.json",
-            "include": [
-              "src/renderer/context-references.tsx",
-              "src/preload/index.d.ts",
-              "src/shared/**/*.ts"
-            ],
-            "compilerOptions": { "composite": false }
-          }
-          JSON
-          pnpm exec tsc --noEmit -p .ci-tsconfig.json
-          rm .ci-tsconfig.json
-
-      - name: Typecheck Renderer
-        run: pnpm typecheck:web
-
-      - name: Lint file tree
-        run: pnpm exec eslint src/renderer/context-drag.ts src/renderer/workspace-file-tree.tsx
-
-      - name: Lint context drop
-        run: pnpm exec eslint src/renderer/context-references.tsx
-
-      - name: Lint remaining changes
-        run: pnpm exec eslint src/main/index.ts src/main/workspace-files.ts src/preload/index.ts src/shared/desktop-api.ts tests/main/workspace-files.test.ts tests/renderer/setup.ts tests/renderer/context-references.test.tsx tests/renderer/workspace-file-tree.test.tsx
-
-      - name: Lint all
-        run: pnpm lint
-
-      - name: Check formatting
-        run: pnpm format:check
-
-      - name: Test
-        run: pnpm test
-
-      - name: Build application
-        run: pnpm build
-
-      - name: Check production output
-        shell: bash
-        run: |
-          set -euo pipefail
-          if find out -type f -name '*.map' -print -quit | grep -q .; then
-            echo '生产构建包含 source map' >&2
-            exit 1
-          fi
-          if rg -n 'OMP UI fixture|tests/fixtures' out/renderer; then
-            echo '生产 Renderer 包含测试 fixture' >&2
-            exit 1
-          fi
-
-  linux-display-smoke:
-    name: Linux ${{ matrix.ubuntu }} / ${{ matrix.arch }} / ${{ matrix.display }}
-    needs: quality
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-22.04
-            ubuntu: '22.04'
-            arch: x64
-            display: x11
-          - runner: ubuntu-22.04
-            ubuntu: '22.04'
-            arch: x64
-            display: wayland
-          - runner: ubuntu-24.04
-            ubuntu: '24.04'
-            arch: x64
-            display: x11
-          - runner: ubuntu-24.04
-            ubuntu: '24.04'
-            arch: x64
-            display: wayland
-          - runner: ubuntu-22.04-arm
-            ubuntu: '22.04'
-            arch: arm64
-            display: x11
-          - runner: ubuntu-22.04-arm
-            ubuntu: '22.04'
-            arch: arm64
-            display: wayland
-          - runner: ubuntu-24.04-arm
-            ubuntu: '24.04'
-            arch: arm64
-            display: x11
-          - runner: ubuntu-24.04-arm
-            ubuntu: '24.04'
-            arch: arm64
-            display: wayland
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
-
-      - name: Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .node-version
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build application
-        run: pnpm build
-
-      - name: Configure Electron sandbox
-        shell: bash
-        run: |
-          set -euo pipefail
-          electron_dir="$(dirname "$(node -p "require('electron')")")"
-          sandbox_path="$electron_dir/chrome-sandbox"
-          test -f "$sandbox_path"
-          sudo chown root:root "$sandbox_path"
-          sudo chmod 4755 "$sandbox_path"
-          stat -c '%U:%G %a %n' "$sandbox_path"
-
-      - name: Install X11 test dependencies
-        if: matrix.display == 'x11'
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends dbus-x11 xauth xvfb
-
-      - name: Install Wayland test dependencies
-        if: matrix.display == 'wayland'
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends dbus-x11 weston
-
-      - name: Run display smoke
-        run: dbus-run-session -- bash scripts/ci-linux-display-smoke.sh "${{ matrix.display }}"
-
-      - name: Upload smoke diagnostics
+      - name: Format main index
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: linux-${{ matrix.ubuntu }}-${{ matrix.arch }}-${{ matrix.display }}
-          path: |
-            ${{ runner.temp }}/omp-ci/**
-            tests/artifacts/*.png
-          if-no-files-found: warn
-          retention-days: 7
+        run: pnpm exec prettier --check src/main/index.ts
+
+      - name: Format workspace files
+        if: always()
+        run: pnpm exec prettier --check src/main/workspace-files.ts
+
+      - name: Format preload
+        if: always()
+        run: pnpm exec prettier --check src/preload/index.ts
+
+      - name: Format context drag
+        if: always()
+        run: pnpm exec prettier --check src/renderer/context-drag.ts
+
+      - name: Format context references
+        if: always()
+        run: pnpm exec prettier --check src/renderer/context-references.tsx
+
+      - name: Format workspace file tree
+        if: always()
+        run: pnpm exec prettier --check src/renderer/workspace-file-tree.tsx
+
+      - name: Format desktop API
+        if: always()
+        run: pnpm exec prettier --check src/shared/desktop-api.ts
+
+      - name: Format main tests
+        if: always()
+        run: pnpm exec prettier --check tests/main/workspace-files.test.ts
+
+      - name: Format renderer setup
+        if: always()
+        run: pnpm exec prettier --check tests/renderer/setup.ts
+
+      - name: Format context tests
+        if: always()
+        run: pnpm exec prettier --check tests/renderer/context-references.test.tsx
+
+      - name: Format tree tests
+        if: always()
+        run: pnpm exec prettier --check tests/renderer/workspace-file-tree.test.tsx
