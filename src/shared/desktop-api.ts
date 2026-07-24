@@ -197,6 +197,25 @@ export type ContextReference = {
   sessionId?: string
 }
 
+export type WorkspaceEntry = {
+  id: string
+  kind: 'file' | 'folder'
+  name: string
+  relativePath: string
+  expandable: boolean
+  size?: number
+}
+
+export type WorkspaceEntryList = {
+  entries: WorkspaceEntry[]
+  truncated: boolean
+}
+
+export type DroppedReferenceResult = {
+  references: ContextReference[]
+  rejectedCount: number
+}
+
 export type DraftRecord = {
   text: string
   references: ContextReference[]
@@ -231,6 +250,10 @@ export type DesktopApi = {
     pinned: boolean
   ): Promise<DesktopResult<WorkspaceOverview>>
   removeWorkspace(workspaceId: string): Promise<DesktopResult<void>>
+  listWorkspaceEntries(
+    workspaceId: string,
+    relativeDirectory?: string
+  ): Promise<DesktopResult<WorkspaceEntryList>>
   listSessions(
     workspaceId: string,
     offset?: number,
@@ -259,6 +282,10 @@ export type DesktopApi = {
     workspaceId: string,
     query: string
   ): Promise<DesktopResult<ContextCandidate[]>>
+  resolveDroppedFiles(
+    workspaceId: string,
+    files: readonly unknown[]
+  ): Promise<DesktopResult<DroppedReferenceResult>>
   getRuntimeState(): Promise<DesktopResult<RuntimeSnapshot>>
   getMessages(): Promise<DesktopResult<unknown>>
   getLoginProviders(): Promise<DesktopResult<LoginProvider[]>>
@@ -302,12 +329,14 @@ export const IPC_CHANNELS = {
   activateWorkspace: 'workspace:activate',
   setWorkspacePinned: 'workspace:set-pinned',
   removeWorkspace: 'workspace:remove',
+  listWorkspaceEntries: 'workspace:entries',
   listSessions: 'session:list',
   setSessionPinned: 'session:set-pinned',
   setSessionArchived: 'session:set-archived',
   renameSession: 'session:rename',
   deleteSession: 'session:delete',
   getContextCandidates: 'context:candidates',
+  resolveDroppedPaths: 'context:resolve-dropped-paths',
   cancelPendingModelSelection: 'runtime:cancel-pending-model-selection',
   cancelProviderLogin: 'runtime:cancel-provider-login',
   event: 'runtime:event',
