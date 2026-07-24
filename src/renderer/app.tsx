@@ -1,13 +1,10 @@
-import * as Popover from '@radix-ui/react-popover'
 import { Command } from 'cmdk'
 import {
-  Check,
   CircleStop,
   ChevronRight,
   FileText,
   Folder,
   MessageSquare,
-  Search,
   Settings2
 } from 'lucide-react'
 import {
@@ -250,36 +247,43 @@ function Conversation({
     !runtime.isAuthenticating &&
     currentModelAvailable
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
+  const [composerSelection, setComposerSelection] = useState<number | null>(
+    null
+  )
   const busyRef = useRef(busy)
   const stoppingRef = useRef(stopping)
   const stopRef = useRef<() => Promise<void>>(async () => undefined)
-  const [slashMenuDismissed, setSlashMenuDismissed] = useState(false)
+  const [slashMenuDismissedFor, setSlashMenuDismissedFor] = useState<
+    string | null
+  >(null)
   const [slashSelectionIndex, setSlashSelectionIndex] = useState(0)
+  const slashMenuSignature = `${slashCatalog.sessionKey ?? ''}\n${input}`
   const slashMenu = useMemo(
-    () =>
-      getSlashMenuModel(
-        input,
-        composerRef.current?.selectionStart,
-        slashCatalog.commands
-      ),
-    [input, slashCatalog.commands]
+    () => getSlashMenuModel(input, composerSelection, slashCatalog.commands),
+    [composerSelection, input, slashCatalog.commands]
   )
   const slashCandidates = slashMenu?.candidates ?? []
   const slashMenuOpen =
     !busy &&
-    !slashMenuDismissed &&
+    slashMenuDismissedFor !== slashMenuSignature &&
     slashMenu !== null &&
     (slashCandidates.length > 0 || slashCatalog.loading || slashCatalog.error)
   const selectedCommand =
     slashMenu?.level === 'command'
       ? slashMenu.candidates[
-          Math.min(slashSelectionIndex, Math.max(0, slashMenu.candidates.length - 1))
+          Math.min(
+            slashSelectionIndex,
+            Math.max(0, slashMenu.candidates.length - 1)
+          )
         ]
       : undefined
   const selectedSubcommand =
     slashMenu?.level === 'subcommand'
       ? slashMenu.candidates[
-          Math.min(slashSelectionIndex, Math.max(0, slashMenu.candidates.length - 1))
+          Math.min(
+            slashSelectionIndex,
+            Math.max(0, slashMenu.candidates.length - 1)
+          )
         ]
       : undefined
 
@@ -322,19 +326,12 @@ function Conversation({
   }, [])
 
   useEffect(() => {
-    setSlashMenuDismissed(false)
-  }, [input, slashCatalog.sessionKey])
-
-  useEffect(() => {
-    setSlashSelectionIndex(0)
-  }, [slashMenu?.level, slashMenu?.query, slashCatalog.sessionKey])
-
-  useEffect(() => {
     if (slashMenuOpen) void onRefreshSlashCommands()
   }, [onRefreshSlashCommands, slashMenuOpen])
 
   const focusComposerEnd = (next: string): void => {
     onInput(next)
+    setComposerSelection(next.length)
     window.requestAnimationFrame(() => {
       const element = composerRef.current
       if (!element) return
@@ -349,7 +346,9 @@ function Conversation({
     const visibleText = submission.displayText
     if (
       !ready ||
-      (!message.trim() && references.length === 0 && attachments.length === 0) ||
+      (!message.trim() &&
+        references.length === 0 &&
+        attachments.length === 0) ||
       stopping ||
       sending
     )
@@ -385,7 +384,8 @@ function Conversation({
       onSentReferences(references)
       onReferences([])
       onAttachments([])
-      setSlashMenuDismissed(false)
+      setSlashMenuDismissedFor(null)
+      setSlashSelectionIndex(0)
       if (temporarySession && result.data) onSessionCreated(result.data)
     } else setError(result.error.message)
     setSending(false)
@@ -622,13 +622,15 @@ function Conversation({
               (!ready && !runtime.approvalModeChanging) || stopping || sending
             }
             onChange={(event) => {
-              setSlashMenuDismissed(false)
+              setComposerSelection(event.currentTarget.selectionStart)
+              setSlashMenuDismissedFor(null)
+              setSlashSelectionIndex(0)
               onInput(event.target.value)
             }}
             onKeyDown={(event) => {
               if (slashMenuOpen && event.key === 'Escape') {
                 event.preventDefault()
-                setSlashMenuDismissed(true)
+                setSlashMenuDismissedFor(slashMenuSignature)
                 return
               }
               if (
@@ -645,7 +647,11 @@ function Conversation({
                 )
                 return
               }
-              if (slashMenuOpen && slashCandidates.length > 0 && event.key === 'Tab') {
+              if (
+                slashMenuOpen &&
+                slashCandidates.length > 0 &&
+                event.key === 'Tab'
+              ) {
                 event.preventDefault()
                 if (slashMenu?.level === 'command' && selectedCommand) {
                   focusComposerEnd(fillSlashCommand(selectedCommand))
@@ -665,7 +671,11 @@ function Conversation({
                 !event.nativeEvent.isComposing
               ) {
                 event.preventDefault()
-                if (slashMenuOpen && slashCandidates.length > 0 && !slashCatalog.loading) {
+                if (
+                  slashMenuOpen &&
+                  slashCandidates.length > 0 &&
+                  !slashCatalog.loading
+                ) {
                   if (slashMenu?.level === 'command' && selectedCommand) {
                     void send(submitSlashCommand(selectedCommand))
                     return
@@ -683,8 +693,14 @@ function Conversation({
                 void send()
               }
             }}
+            onClick={(event) =>
+              setComposerSelection(event.currentTarget.selectionStart)
+            }
             onPaste={pasteImages}
             placeholder={strings.composerPlaceholder}
+            onSelect={(event) =>
+              setComposerSelection(event.currentTarget.selectionStart)
+            }
             value={input}
           />
           <div className="flex items-center justify-between px-1">
@@ -898,7 +914,7 @@ export function App(): React.JSX.Element {
     setSlashCatalog((current) => {
       if (current.sessionKey === nextProjectionId) return current
       const cached = nextProjectionId
-        ? slashCatalogCache.current.get(nextProjectionId) ?? []
+        ? (slashCatalogCache.current.get(nextProjectionId) ?? [])
         : []
       return {
         sessionKey: nextProjectionId,
@@ -1159,10 +1175,19 @@ export function App(): React.JSX.Element {
   ])
 
   useEffect(() => {
-    if (runtime.status === 'ready' && runtime.workspacePath && runtime.sessionId) {
+    if (
+      runtime.status === 'ready' &&
+      runtime.workspacePath &&
+      runtime.sessionId
+    ) {
       void refreshSlashCommands()
     }
-  }, [refreshSlashCommands, runtime.sessionId, runtime.status, runtime.workspacePath])
+  }, [
+    refreshSlashCommands,
+    runtime.sessionId,
+    runtime.status,
+    runtime.workspacePath
+  ])
 
   useEffect(() => {
     if (!activeWorkspaceId || fixture) return

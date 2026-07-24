@@ -880,7 +880,9 @@ function AssistantMessage(): React.JSX.Element | null {
   const finalText = turn.finalItemIds
     .map((id) => turn.items.find((item) => item.id === id))
     .flatMap((item) =>
-      item?.kind === 'narrative' && item.narrative === 'final' ? [item.text] : []
+      item?.kind === 'narrative' && item.narrative === 'final'
+        ? [item.text]
+        : []
     )
     .join('')
   const collapsed = shouldCollapseTurn(turn)
@@ -936,7 +938,9 @@ function AssistantMessage(): React.JSX.Element | null {
 function UserMessage(): React.JSX.Element {
   const text = useAuiState((state) =>
     state.message.content
-      .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
+      .filter(
+        (part): part is { type: 'text'; text: string } => part.type === 'text'
+      )
       .map((part) => part.text)
       .join('')
   )
