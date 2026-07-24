@@ -217,6 +217,66 @@ describe('App shell', () => {
     ).toBeInTheDocument()
   })
 
+  it('Slash 菜单支持上下键切换并按当前选中项发送', async () => {
+    let runtimeListener:
+      Parameters<typeof window.desktop.onRuntimeEvent>[0] | undefined
+    vi.mocked(window.desktop.onRuntimeEvent).mockImplementationOnce(
+      (listener) => {
+        runtimeListener = listener
+        return vi.fn()
+      }
+    )
+    vi.mocked(window.desktop.getAvailableCommands).mockResolvedValue({
+      ok: true,
+      data: [
+        { name: 'alpha', source: 'builtin' },
+        { name: 'beta', source: 'builtin' }
+      ]
+    })
+    render(<App />)
+
+    await waitFor(() => expect(runtimeListener).toBeDefined())
+    act(() => {
+      runtimeListener?.({
+        type: 'snapshot',
+        snapshot: {
+          status: 'ready',
+          workspacePath: '/tmp/workspace',
+          sessionId: 'session-1',
+          isStreaming: false,
+          queuedMessageCount: 0
+        }
+      })
+    })
+    await waitFor(() =>
+      expect(window.desktop.getAvailableCommands).toHaveBeenCalledTimes(1)
+    )
+
+    const composer = await screen.findByRole('textbox', { name: '任务输入' })
+    fireEvent.change(composer, { target: { value: '/' } })
+    ;(composer as HTMLTextAreaElement).setSelectionRange(1, 1)
+    fireEvent.select(composer)
+
+    let options = await screen.findAllByRole('option')
+    expect(options[0]).toHaveAttribute('aria-selected', 'true')
+    expect(options[1]).toHaveAttribute('aria-selected', 'false')
+
+    fireEvent.keyDown(composer, { key: 'ArrowDown' })
+    await waitFor(() => {
+      options = screen.getAllByRole('option')
+      expect(options[0]).toHaveAttribute('aria-selected', 'false')
+      expect(options[1]).toHaveAttribute('aria-selected', 'true')
+    })
+
+    fireEvent.keyDown(composer, { key: 'Enter' })
+    await waitFor(() =>
+      expect(window.desktop.prompt).toHaveBeenCalledWith({
+        message: '/beta',
+        references: []
+      })
+    )
+  })
+
   it('存在文本选择时 Ctrl+C 保持复制且不触发 Stop', async () => {
     vi.mocked(window.desktop.getRuntimeState).mockResolvedValue({
       ok: true,

@@ -9,6 +9,7 @@ import type {
 import { IPC_CHANNELS } from '../shared/desktop-api'
 
 const desktopApi: DesktopApi = {
+  copyText: (text) => ipcRenderer.invoke(IPC_CHANNELS.copyText, text),
   chooseWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.chooseWorkspace),
   getWorkspaces: (offset) =>
     ipcRenderer.invoke(IPC_CHANNELS.getWorkspaces, offset),

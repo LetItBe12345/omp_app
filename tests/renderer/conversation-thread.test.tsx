@@ -244,4 +244,25 @@ describe('ConversationThread', () => {
     expect(window.desktop.openExternal).not.toHaveBeenCalled()
     expect(screen.getByText('远程图')).toBeInTheDocument()
   })
+
+  it('顶层复制按钮走 Desktop 原生剪贴板 IPC', async () => {
+    const projection = projectionFrom([
+      {
+        type: 'message_end',
+        message: {
+          id: 'a1',
+          role: 'assistant',
+          stopReason: 'stop',
+          content: [{ type: 'text', text: '回答内容' }]
+        }
+      },
+      { type: 'agent_end' }
+    ])
+    render(<Harness initial={projection} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '复制回答' }))
+    await waitFor(() =>
+      expect(window.desktop.copyText).toHaveBeenCalledWith('回答内容')
+    )
+  })
 })

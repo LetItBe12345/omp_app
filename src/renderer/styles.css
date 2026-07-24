@@ -60,12 +60,13 @@ body {
 }
 
 .user-message {
+  position: relative;
   width: fit-content;
   max-width: 72%;
   margin: 0 0 1.75rem auto;
   border-radius: 1rem;
   background: var(--surface-selected);
-  padding: 0.7rem 1rem;
+  padding: 0.7rem 2.4rem 0.7rem 1rem;
   color: var(--text-primary);
   font-size: 0.875rem;
   line-height: 1.6;
@@ -73,10 +74,10 @@ body {
   user-select: text;
 }
 
-.user-copy-row {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 0.35rem;
+.user-copy-inline {
+  position: absolute;
+  top: 0.45rem;
+  right: 0.45rem;
 }
 
 .assistant-message {
@@ -256,6 +257,13 @@ body {
 
 .message-copy:hover {
   background: var(--surface-selected);
+}
+
+.message-copy-compact {
+  min-width: 1.6rem;
+  min-height: 1.6rem;
+  justify-content: center;
+  padding: 0;
 }
 
 .command-result-card {
@@ -558,19 +566,29 @@ textarea {
 
 .slash-menu-item {
   display: grid;
+  width: 100%;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) max-content;
   align-items: center;
   gap: 0.6rem;
   min-height: 2rem;
+  border: 0;
   border-radius: 0.55rem;
+  background: transparent;
   padding: 0.45rem 0.6rem;
   color: var(--text-primary);
   font-size: 0.76rem;
   line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
 }
 
 .slash-menu-item[data-selected='true'] {
   background: var(--surface-selected);
+}
+
+.slash-menu-item:focus-visible {
+  outline: 2px solid #696963;
+  outline-offset: -2px;
 }
 
 .slash-menu-primary,

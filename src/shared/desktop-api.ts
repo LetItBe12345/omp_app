@@ -239,6 +239,7 @@ export type ExtensionUiResponse =
 export type Unsubscribe = () => void
 
 export type DesktopApi = {
+  copyText(text: string): Promise<boolean>
   openExternal(url: string): Promise<boolean>
   openRuntimeLog(): Promise<boolean>
   revealPath(path: string): Promise<boolean>
@@ -319,6 +320,7 @@ export type DesktopApi = {
 }
 
 export const IPC_CHANNELS = {
+  copyText: 'desktop:copy-text',
   chooseWorkspace: 'runtime:choose-workspace',
   getWorkspaces: 'workspace:list',
   activateWorkspace: 'workspace:activate',

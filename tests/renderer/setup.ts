@@ -21,6 +21,7 @@ if (typeof window !== 'undefined') {
   Object.defineProperty(window, 'desktop', {
     configurable: true,
     value: {
+      copyText: vi.fn().mockResolvedValue(true),
       chooseWorkspace: vi.fn().mockResolvedValue({ ok: true, data: null }),
       getWorkspaces: vi.fn().mockResolvedValue({
         ok: true,

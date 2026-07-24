@@ -237,16 +237,12 @@ export type SlashMenuModel =
 
 export function getSlashMenuModel(
   input: string,
-  selectionStart: number | null | undefined,
+  _selectionStart: number | null | undefined,
   commands: readonly AvailableSlashCommand[]
 ): SlashMenuModel | null {
   const parsed = parseLeadingSlashInput(input)
   if (!parsed) return null
-  const caret = selectionStart ?? input.length
-  const firstTokenStart = parsed.leadingWhitespace.length + 1
-  const firstTokenEnd = firstTokenStart + parsed.firstToken.length
-  if (caret < firstTokenStart) return null
-  if (caret <= firstTokenEnd || parsed.firstSpaceIndex < 0) {
+  if (parsed.firstSpaceIndex < 0) {
     const candidates = rankedCommands(commands, parsed.firstToken)
     return candidates.length > 0 || parsed.firstToken.length === 0
       ? {
@@ -266,9 +262,6 @@ export function getSlashMenuModel(
     secondSpaceIndex < 0
       ? subcommandText
       : subcommandText.slice(0, secondSpaceIndex)
-  const secondTokenStart = firstTokenEnd + 1
-  const secondTokenEnd = secondTokenStart + secondToken.length
-  if (caret < secondTokenStart || caret > secondTokenEnd) return null
   const candidates = rankedSubcommands(command.subcommands, secondToken)
   return candidates.length > 0 || secondToken.length === 0
     ? {

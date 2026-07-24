@@ -168,18 +168,20 @@ const convertThreadMessage = (message: ThreadMessageLike): ThreadMessageLike =>
 function CopyActionButton({
   label,
   value,
-  className
+  className,
+  compact = false
 }: {
   label: string
   value: string
   className?: string
+  compact?: boolean
 }): React.JSX.Element {
   const [state, setState] = useState<'idle' | 'success' | 'error'>('idle')
 
   const copy = async (): Promise<void> => {
     try {
-      await navigator.clipboard.writeText(value)
-      setState('success')
+      const copied = await window.desktop.copyText(value)
+      setState(copied ? 'success' : 'error')
     } catch {
       setState('error')
     }
@@ -191,15 +193,20 @@ function CopyActionButton({
       aria-label={label}
       className={className ?? 'message-copy'}
       onClick={() => void copy()}
+      title={label}
       type="button"
     >
       {state === 'success' ? (
         <Check size={13} />
       ) : state === 'error' ? (
-        <>
+        compact ? (
           <CircleAlert size={13} />
-          <span>复制失败</span>
-        </>
+        ) : (
+          <>
+            <CircleAlert size={13} />
+            <span>复制失败</span>
+          </>
+        )
       ) : (
         <Copy size={13} />
       )}
@@ -266,10 +273,10 @@ function ToolRow({
     if (!result.ok) return
     const value = findToolResult(result.data, action.toolCallId)
     if (value === undefined) return
-    await navigator.clipboard.writeText(
+    const copied = await window.desktop.copyText(
       typeof value === 'string' ? value : JSON.stringify(value, null, 2)
     )
-    setCopied(true)
+    setCopied(copied)
     window.setTimeout(() => setCopied(false), 1_500)
   }
   return (
@@ -952,9 +959,10 @@ function UserMessage(): React.JSX.Element {
         }}
       />
       {text ? (
-        <div className="user-copy-row">
+        <div className="user-copy-inline">
           <CopyActionButton
-            className="message-copy"
+            className="message-copy message-copy-compact"
+            compact
             label="复制用户输入"
             value={text}
           />

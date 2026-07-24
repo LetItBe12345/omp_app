@@ -1,4 +1,3 @@
-import { Command } from 'cmdk'
 import {
   CircleStop,
   ChevronRight,
@@ -247,6 +246,7 @@ function Conversation({
     !runtime.isAuthenticating &&
     currentModelAvailable
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
+  const suppressComposerSelectionSyncRef = useRef(false)
   const [composerSelection, setComposerSelection] = useState<number | null>(
     null
   )
@@ -257,6 +257,7 @@ function Conversation({
     string | null
   >(null)
   const [slashSelectionIndex, setSlashSelectionIndex] = useState(0)
+  const slashItemRefs = useRef<Array<HTMLButtonElement | null>>([])
   const slashMenuSignature = `${slashCatalog.sessionKey ?? ''}\n${input}`
   const slashMenu = useMemo(
     () => getSlashMenuModel(input, composerSelection, slashCatalog.commands),
@@ -268,23 +269,17 @@ function Conversation({
     slashMenuDismissedFor !== slashMenuSignature &&
     slashMenu !== null &&
     (slashCandidates.length > 0 || slashCatalog.loading || slashCatalog.error)
+  const effectiveSlashSelectionIndex =
+    slashCandidates.length > 0
+      ? Math.min(slashSelectionIndex, slashCandidates.length - 1)
+      : -1
   const selectedCommand =
     slashMenu?.level === 'command'
-      ? slashMenu.candidates[
-          Math.min(
-            slashSelectionIndex,
-            Math.max(0, slashMenu.candidates.length - 1)
-          )
-        ]
+      ? slashMenu.candidates[Math.max(0, effectiveSlashSelectionIndex)]
       : undefined
   const selectedSubcommand =
     slashMenu?.level === 'subcommand'
-      ? slashMenu.candidates[
-          Math.min(
-            slashSelectionIndex,
-            Math.max(0, slashMenu.candidates.length - 1)
-          )
-        ]
+      ? slashMenu.candidates[Math.max(0, effectiveSlashSelectionIndex)]
       : undefined
 
   const stop = async (): Promise<void> => {
@@ -328,6 +323,17 @@ function Conversation({
   useEffect(() => {
     if (slashMenuOpen) void onRefreshSlashCommands()
   }, [onRefreshSlashCommands, slashMenuOpen])
+
+  useEffect(() => {
+    slashItemRefs.current = slashItemRefs.current.slice(
+      0,
+      slashCandidates.length
+    )
+    if (!slashMenuOpen || effectiveSlashSelectionIndex < 0) return
+    slashItemRefs.current[effectiveSlashSelectionIndex]?.scrollIntoView({
+      block: 'nearest'
+    })
+  }, [effectiveSlashSelectionIndex, slashCandidates.length, slashMenuOpen])
 
   const focusComposerEnd = (next: string): void => {
     onInput(next)
@@ -431,73 +437,81 @@ function Conversation({
 
   const slashMenuPanel = slashMenuOpen ? (
     <div className="slash-menu-panel" data-slot="slash-command-menu">
-      <Command label="Slash 命令">
-        <Command.List className="slash-menu-list">
-          {slashCatalog.stale && (
-            <div className="slash-menu-note">
-              命令列表刷新失败，当前显示上次结果
-            </div>
-          )}
-          {slashCatalog.loading && slashCandidates.length === 0 ? (
-            <div className="slash-menu-empty">正在加载命令…</div>
-          ) : slashCandidates.length > 0 ? (
-            slashMenu?.level === 'command' ? (
-              slashMenu.candidates.map((command, index) => (
-                <Command.Item
-                  className="slash-menu-item"
-                  data-selected={index === slashSelectionIndex}
-                  key={command.name}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onMouseEnter={() => setSlashSelectionIndex(index)}
-                  onSelect={() => focusComposerEnd(fillSlashCommand(command))}
-                  value={command.name}
-                >
-                  <span className="slash-menu-primary">
-                    <span className="truncate">/{command.name}</span>
-                    {command.input?.hint && (
-                      <span className="slash-menu-hint truncate">
-                        {command.input.hint}
-                      </span>
-                    )}
-                  </span>
-                  <span className="slash-menu-description truncate">
-                    {command.description ?? ''}
-                  </span>
-                  <span className="slash-menu-source">{command.source}</span>
-                </Command.Item>
-              ))
-            ) : slashMenu ? (
-              slashMenu.candidates.map((subcommand, index) => (
-                <Command.Item
-                  className="slash-menu-item"
-                  data-selected={index === slashSelectionIndex}
-                  key={subcommand.name}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onMouseEnter={() => setSlashSelectionIndex(index)}
-                  onSelect={() =>
-                    focusComposerEnd(
-                      fillSlashSubcommand(slashMenu.command, subcommand)
-                    )
-                  }
-                  value={subcommand.name}
-                >
-                  <span className="slash-menu-primary">
-                    <span className="truncate">{subcommand.name}</span>
-                  </span>
-                  <span className="slash-menu-description truncate">
-                    {subcommand.usage ?? subcommand.description ?? ''}
-                  </span>
-                  <span className="slash-menu-source">
-                    {slashMenu.command.source}
-                  </span>
-                </Command.Item>
-              ))
-            ) : null
-          ) : slashCatalog.error ? (
-            <div className="slash-menu-empty">{slashCatalog.error}</div>
-          ) : null}
-        </Command.List>
-      </Command>
+      <div aria-label="Slash 命令" className="slash-menu-list" role="listbox">
+        {slashCatalog.stale && (
+          <div className="slash-menu-note">
+            命令列表刷新失败，当前显示上次结果
+          </div>
+        )}
+        {slashCatalog.loading && slashCandidates.length === 0 ? (
+          <div className="slash-menu-empty">正在加载命令…</div>
+        ) : slashCandidates.length > 0 ? (
+          slashMenu?.level === 'command' ? (
+            slashMenu.candidates.map((command, index) => (
+              <button
+                aria-selected={index === effectiveSlashSelectionIndex}
+                className="slash-menu-item"
+                data-selected={index === effectiveSlashSelectionIndex}
+                key={command.name}
+                onClick={() => focusComposerEnd(fillSlashCommand(command))}
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => setSlashSelectionIndex(index)}
+                ref={(element) => {
+                  slashItemRefs.current[index] = element
+                }}
+                role="option"
+                type="button"
+              >
+                <span className="slash-menu-primary">
+                  <span className="truncate">/{command.name}</span>
+                  {command.input?.hint && (
+                    <span className="slash-menu-hint truncate">
+                      {command.input.hint}
+                    </span>
+                  )}
+                </span>
+                <span className="slash-menu-description truncate">
+                  {command.description ?? ''}
+                </span>
+                <span className="slash-menu-source">{command.source}</span>
+              </button>
+            ))
+          ) : slashMenu ? (
+            slashMenu.candidates.map((subcommand, index) => (
+              <button
+                aria-selected={index === effectiveSlashSelectionIndex}
+                className="slash-menu-item"
+                data-selected={index === effectiveSlashSelectionIndex}
+                key={subcommand.name}
+                onClick={() =>
+                  focusComposerEnd(
+                    fillSlashSubcommand(slashMenu.command, subcommand)
+                  )
+                }
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => setSlashSelectionIndex(index)}
+                ref={(element) => {
+                  slashItemRefs.current[index] = element
+                }}
+                role="option"
+                type="button"
+              >
+                <span className="slash-menu-primary">
+                  <span className="truncate">{subcommand.name}</span>
+                </span>
+                <span className="slash-menu-description truncate">
+                  {subcommand.usage ?? subcommand.description ?? ''}
+                </span>
+                <span className="slash-menu-source">
+                  {slashMenu.command.source}
+                </span>
+              </button>
+            ))
+          ) : null
+        ) : slashCatalog.error ? (
+          <div className="slash-menu-empty">{slashCatalog.error}</div>
+        ) : null}
+      </div>
     </div>
   ) : null
 
@@ -639,6 +653,10 @@ function Conversation({
                 (event.key === 'ArrowDown' || event.key === 'ArrowUp')
               ) {
                 event.preventDefault()
+                suppressComposerSelectionSyncRef.current = true
+                queueMicrotask(() => {
+                  suppressComposerSelectionSyncRef.current = false
+                })
                 const delta = event.key === 'ArrowDown' ? 1 : -1
                 setSlashSelectionIndex(
                   (current) =>
@@ -698,9 +716,10 @@ function Conversation({
             }
             onPaste={pasteImages}
             placeholder={strings.composerPlaceholder}
-            onSelect={(event) =>
+            onSelect={(event) => {
+              if (suppressComposerSelectionSyncRef.current) return
               setComposerSelection(event.currentTarget.selectionStart)
-            }
+            }}
             value={input}
           />
           <div className="flex items-center justify-between px-1">
