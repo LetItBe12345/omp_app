@@ -18,6 +18,7 @@ import { DesktopStateStore } from './desktop-state'
 import { registerRuntimeIpc } from './runtime-ipc'
 import { RuntimeDiagnostics } from './runtime-diagnostics'
 import { RuntimeSupervisor } from './runtime-supervisor'
+import { RuntimeEnvironmentResolver } from './runtime-environment'
 import { listWorkspaceSessions } from './session-catalog'
 import { installNavigationSecurity, installSessionSecurity } from './security'
 import { configureLinuxFileChooser } from './linux-file-chooser'
@@ -43,6 +44,7 @@ const runtimeSupervisor = new RuntimeSupervisor({
   runtimePath,
   diagnostics: new RuntimeDiagnostics(join(app.getPath('logs'), 'runtime.log'))
 })
+const runtimeEnvironmentResolver = new RuntimeEnvironmentResolver(runtimePath)
 const runtimeStatePath = join(app.getPath('userData'), 'runtime-state.json')
 const desktopStateStore = new DesktopStateStore(
   join(app.getPath('userData'), 'desktop-state.json'),
@@ -75,7 +77,15 @@ async function restoreRuntimeState(): Promise<void> {
         })
         .catch((error: unknown) => log.warn('补存 Session 默认权限失败', error))
     }
-    await runtimeSupervisor.start(workspace.path, process.env, approvalMode)
+    const resolved = await runtimeEnvironmentResolver.resolve(
+      desktopStateStore.runtimeNetworkConfig()
+    )
+    runtimeSupervisor.recordDiagnostic(
+      resolved.sourceError
+        ? 'Login Shell 环境探测失败，已使用 Electron 启动环境'
+        : 'Login Shell 环境探测成功'
+    )
+    await runtimeSupervisor.start(workspace.path, resolved.env, approvalMode)
     if (workspace.activeSessionId) {
       try {
         const sessions = await listWorkspaceSessions(
@@ -316,7 +326,8 @@ if (hasSingleInstanceLock) {
       runtimeSupervisor,
       desktopStateStore,
       () => mainWindow,
-      process.env['ELECTRON_RENDERER_URL']
+      process.env['ELECTRON_RENDERER_URL'],
+      runtimeEnvironmentResolver
     )
     cleanupWorkspaceFiles = registerWorkspaceFilesIpc(
       desktopStateStore,

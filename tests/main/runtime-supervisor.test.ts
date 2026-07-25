@@ -76,6 +76,34 @@ describe('RuntimeSupervisor', () => {
     })
   })
 
+  it('启动和重启时使用调用方提供的最终环境', async () => {
+    const fixture = resolve('tests/fixtures/fake-omp.mjs')
+    const spawnedValues: Array<string | undefined> = []
+    supervisor = new RuntimeSupervisor({
+      runtimePath: process.execPath,
+      diagnostics,
+      runtimeVersion: '17.0.6',
+      spawnRuntime: (_executable, args, options) => {
+        spawnedValues.push(options.env?.['OMP_ENV_TEST'])
+        return spawn(process.execPath, [fixture, ...args], {
+          ...options,
+          stdio: ['pipe', 'pipe', 'pipe']
+        })
+      }
+    })
+
+    await supervisor.start(process.cwd(), {
+      ...process.env,
+      OMP_ENV_TEST: 'login-shell'
+    })
+    await supervisor.restart(undefined, {
+      ...process.env,
+      OMP_ENV_TEST: 'manual-proxy'
+    })
+
+    expect(spawnedValues).toEqual(['login-shell', 'manual-proxy'])
+  })
+
   it('关闭前刷新 Runtime 诊断日志', async () => {
     const flush = vi.spyOn(diagnostics, 'flush')
     await supervisor.start(process.cwd())

@@ -73,6 +73,39 @@ export type RuntimeSnapshot = {
   error?: RuntimeError
 }
 
+export type RuntimeNetworkMode = 'off' | 'auto' | 'manual'
+
+export type RuntimeNetworkConfig = {
+  mode: RuntimeNetworkMode
+  manualPort?: number
+}
+
+export type RuntimeNetworkStatus = {
+  config: RuntimeNetworkConfig
+  source: 'login-shell' | 'electron-fallback'
+  result: 'direct' | 'http-proxy' | 'unsupported-socks'
+  proxySource?: string
+  error?: string
+}
+
+export type RuntimeToolDiagnostic = {
+  name: 'omp' | 'git' | 'node' | 'python'
+  path?: string
+  version?: string
+  error?: string
+}
+
+export type RuntimeEnvironmentDiagnostic = {
+  shell: string
+  path: string
+  workspace?: string
+  source: 'login-shell' | 'electron-fallback'
+  sourceError?: string
+  tools: RuntimeToolDiagnostic[]
+  network: RuntimeNetworkStatus
+  copyText: string
+}
+
 export type LoginProvider = {
   id: string
   name: string
@@ -386,6 +419,15 @@ export type DesktopApi = {
   cancelProviderLogin(): Promise<DesktopResult<void>>
   reopenProviderLoginUrl(): Promise<DesktopResult<boolean>>
   restartRuntime(): Promise<DesktopResult<RuntimeSnapshot>>
+  getRuntimeNetwork(): Promise<DesktopResult<RuntimeNetworkStatus>>
+  applyRuntimeNetwork(
+    config: RuntimeNetworkConfig
+  ): Promise<DesktopResult<RuntimeNetworkStatus>>
+  detectRuntimeProxy(): Promise<DesktopResult<RuntimeNetworkStatus>>
+  checkRuntimeProxyPort(port: number): Promise<DesktopResult<boolean>>
+  getRuntimeEnvironmentDiagnostic(): Promise<
+    DesktopResult<RuntimeEnvironmentDiagnostic>
+  >
   prompt(input: PromptInput): Promise<DesktopResult<void>>
   followUp(input: PromptInput): Promise<DesktopResult<void>>
   stopCurrentRun(): Promise<DesktopResult<PromptInput | null>>
@@ -456,6 +498,11 @@ export const IPC_CHANNELS = {
   rendererReady: 'desktop:renderer-ready',
   respondExtensionUi: 'runtime:respond-extension-ui',
   restartRuntime: 'runtime:restart',
+  getRuntimeNetwork: 'runtime-network:get',
+  applyRuntimeNetwork: 'runtime-network:apply',
+  detectRuntimeProxy: 'runtime-network:detect',
+  checkRuntimeProxyPort: 'runtime-network:check-port',
+  getRuntimeEnvironmentDiagnostic: 'runtime-environment:diagnostic',
   revealPath: 'desktop:reveal-path',
   validateLocalPath: 'desktop:validate-local-path',
   reopenProviderLoginUrl: 'runtime:reopen-provider-login-url',

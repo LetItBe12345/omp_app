@@ -19,6 +19,7 @@ import type {
   RuntimeEvent,
   RuntimeError,
   RuntimeSnapshot,
+  RuntimeNetworkConfig,
   ProviderLoginState,
   WorkspaceActivation,
   WorkspaceSummary
@@ -30,6 +31,10 @@ import { validateExternalUrl } from './external-url'
 import { redactRuntimeLog } from './runtime-diagnostics'
 import { RuntimeFailure } from './runtime-supervisor'
 import type { RuntimeSupervisor } from './runtime-supervisor'
+import {
+  checkLocalProxyPort,
+  RuntimeEnvironmentResolver
+} from './runtime-environment'
 import { log } from './logger'
 import {
   findContextCandidates,
@@ -270,7 +275,8 @@ export function registerRuntimeIpc(
   supervisor: RuntimeSupervisor,
   stateStore: DesktopStateStore,
   getWindow: WindowGetter,
-  developmentUrl?: string
+  developmentUrl?: string,
+  environmentResolver = new RuntimeEnvironmentResolver(process.execPath)
 ): () => void {
   const pendingExtensionUi = new Map<
     string,
@@ -326,6 +332,11 @@ export function registerRuntimeIpc(
     IPC_CHANNELS.getMessages,
     IPC_CHANNELS.getRuntimeState,
     IPC_CHANNELS.restartRuntime,
+    IPC_CHANNELS.getRuntimeNetwork,
+    IPC_CHANNELS.applyRuntimeNetwork,
+    IPC_CHANNELS.detectRuntimeProxy,
+    IPC_CHANNELS.checkRuntimeProxyPort,
+    IPC_CHANNELS.getRuntimeEnvironmentDiagnostic,
     IPC_CHANNELS.prompt,
     IPC_CHANNELS.followUp,
     IPC_CHANNELS.stopCurrentRun,
@@ -567,6 +578,63 @@ export function registerRuntimeIpc(
     }
   }
 
+  const resolveRuntimeEnvironment = async () => {
+    const resolved = await environmentResolver.resolve(
+      stateStore.runtimeNetworkConfig()
+    )
+    supervisor.recordDiagnostic(
+      resolved.sourceError
+        ? 'Login Shell 环境探测失败，已使用 Electron 启动环境'
+        : 'Login Shell 环境探测成功'
+    )
+    return resolved
+  }
+
+  const validateNetworkConfig = (value: unknown): RuntimeNetworkConfig => {
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+      throw new RuntimeFailure('INVALID_ARGUMENT', '代理配置无效', false)
+    const record = value as Record<string, unknown>
+    if (
+      record['mode'] !== 'off' &&
+      record['mode'] !== 'auto' &&
+      record['mode'] !== 'manual'
+    )
+      throw new RuntimeFailure('INVALID_ARGUMENT', '代理模式无效', false)
+    const currentPort = stateStore.runtimeNetworkConfig().manualPort
+    const candidate = record['manualPort'] ?? currentPort
+    const manualPort =
+      typeof candidate === 'number' &&
+      Number.isInteger(candidate) &&
+      candidate >= 1 &&
+      candidate <= 65_535
+        ? candidate
+        : undefined
+    if (record['mode'] === 'manual' && !manualPort)
+      throw new RuntimeFailure(
+        'INVALID_ARGUMENT',
+        '请输入 1–65535 的本地代理端口',
+        false
+      )
+    return {
+      mode: record['mode'],
+      ...(manualPort ? { manualPort } : {})
+    }
+  }
+
+  const assertNetworkChangeAllowed = (): void => {
+    if (
+      supervisor.snapshot.isStreaming ||
+      supervisor.snapshot.queuedMessageCount > 0 ||
+      supervisor.snapshot.isAuthenticating ||
+      activeLoginTask
+    )
+      throw new RuntimeFailure(
+        'RUNTIME_NOT_READY',
+        '任务、Follow-up 或 Provider 登录仍在进行',
+        true
+      )
+  }
+
   const requireWorkspace = (id: unknown) => {
     if (typeof id !== 'string')
       throw new RuntimeFailure('INVALID_ARGUMENT', 'Workspace ID 无效', false)
@@ -776,9 +844,10 @@ export function registerRuntimeIpc(
             supervisor.snapshot.approvalMode === approvalMode
           )
             await supervisor.getState()
-          else if (approvalMode === 'yolo')
-            await supervisor.start(workspace.path)
-          else await supervisor.start(workspace.path, process.env, approvalMode)
+          else {
+            const resolved = await resolveRuntimeEnvironment()
+            await supervisor.start(workspace.path, resolved.env, approvalMode)
+          }
           log.info('performance', {
             event: 'workspace_activation_to_runtime_ready',
             elapsedMs: Math.round(performance.now() - startedAt)
@@ -1690,11 +1759,97 @@ export function registerRuntimeIpc(
   ipcMain.handle(IPC_CHANNELS.restartRuntime, async (event) => {
     try {
       assertTrustedSender(event, getWindow, developmentUrl)
-      return success(await supervisor.restart())
+      const resolved = await resolveRuntimeEnvironment()
+      return success(await supervisor.restart(undefined, resolved.env))
     } catch (error) {
       return failure(error)
     }
   })
+
+  ipcMain.handle(IPC_CHANNELS.getRuntimeNetwork, async (event) => {
+    try {
+      assertTrustedSender(event, getWindow, developmentUrl)
+      const resolved = await environmentResolver.resolve(
+        stateStore.runtimeNetworkConfig()
+      )
+      return success(resolved.network)
+    } catch (error) {
+      return failure(error)
+    }
+  })
+
+  ipcMain.handle(
+    IPC_CHANNELS.applyRuntimeNetwork,
+    async (event, value: unknown) => {
+      try {
+        assertTrustedSender(event, getWindow, developmentUrl)
+        assertNetworkChangeAllowed()
+        const config = validateNetworkConfig(value)
+        await stateStore.setRuntimeNetworkConfig(config)
+        const resolved = await resolveRuntimeEnvironment()
+        if (supervisor.snapshot.workspacePath) {
+          await supervisor.restart(undefined, resolved.env)
+        }
+        return success(resolved.network)
+      } catch (error) {
+        return failure(error)
+      }
+    }
+  )
+
+  ipcMain.handle(IPC_CHANNELS.detectRuntimeProxy, async (event) => {
+    try {
+      assertTrustedSender(event, getWindow, developmentUrl)
+      assertNetworkChangeAllowed()
+      const config = stateStore.runtimeNetworkConfig()
+      const resolved = await resolveRuntimeEnvironment()
+      if (config.mode === 'auto' && supervisor.snapshot.workspacePath)
+        await supervisor.restart(undefined, resolved.env)
+      return success(resolved.network)
+    } catch (error) {
+      return failure(error)
+    }
+  })
+
+  ipcMain.handle(
+    IPC_CHANNELS.checkRuntimeProxyPort,
+    async (event, value: unknown) => {
+      try {
+        assertTrustedSender(event, getWindow, developmentUrl)
+        if (
+          typeof value !== 'number' ||
+          !Number.isInteger(value) ||
+          value < 1 ||
+          value > 65_535
+        )
+          throw new RuntimeFailure(
+            'INVALID_ARGUMENT',
+            '端口必须是 1–65535 的整数',
+            false
+          )
+        return success(await checkLocalProxyPort(value))
+      } catch (error) {
+        return failure(error)
+      }
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.getRuntimeEnvironmentDiagnostic,
+    async (event) => {
+      try {
+        assertTrustedSender(event, getWindow, developmentUrl)
+        return success(
+          await environmentResolver.diagnostic(
+            stateStore.runtimeNetworkConfig(),
+            supervisor.snapshot.workspacePath
+          )
+        )
+      } catch (error) {
+        return failure(error)
+      }
+    }
+  )
 
   ipcMain.handle(IPC_CHANNELS.prompt, async (event, value: unknown) => {
     try {
