@@ -1,6 +1,6 @@
 # MVP-09：OMP Runtime 环境与网络
 
-- 状态：实现完成，待真实 VPN / Provider 联网验收
+- 状态：已完成
 - 优先级：P1
 - 前置任务：MVP-08
 - 后续任务：MVP-10
@@ -71,9 +71,9 @@
 
 ### 测试与诊断
 
-- [ ] 测试 OMP 模型接口连通性。
-- [ ] 通过 RPC `bash` 验证 PATH、普通环境变量和代理变量确实继承。
-- [ ] 通过 RPC `bash` 测试 `git`、`curl` 或等价命令的网络访问。
+- [x] 测试 OMP 模型接口连通性。
+- [x] 通过 RPC `bash` 验证 PATH、普通环境变量和代理变量确实继承。
+- [x] 通过 RPC `bash` 测试 `git`、`curl` 或等价命令的网络访问。
 - [x] 测试不注入代理时不会意外继承 Desktop 或 Login Shell 的代理变量。
 - [x] 测试端口格式、范围和不可达状态。
 - [x] 端口检测可选，检测失败不阻止保存合法端口。
@@ -85,7 +85,7 @@
 - [x] OMP Runtime 使用探测到的 PATH、普通环境变量、代理和 Workspace。
 - [x] RPC Bash 执行的命令继承 OMP Runtime 的最终环境。
 - [x] 从桌面启动应用时可以找到 Login Shell 中的开发工具。
-- [ ] VPN 提供本地 HTTP 入站时，OMP 内部授权 API、模型请求和 RPC Bash 命令都能按配置联网。
+- [x] VPN 提供本地 HTTP 入站时，OMP 内部授权 API、模型请求和 RPC Bash 命令都能按配置联网。
 - [x] Provider 授权网页继续使用系统默认浏览器及其自身网络配置。
 - [x] 不注入代理模式下，OMP Runtime 和 RPC Bash 不携带代理环境变量。
 - [x] 环境检测可以定位常见 PATH 和代理问题。
