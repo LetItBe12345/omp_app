@@ -1,6 +1,6 @@
 # Issue 31：Ubuntu Linux 中文输入法
 
-- 状态：进行中
+- 状态：已完成
 - GitHub Issue：<https://github.com/LetItBe12345/omp_app/issues/31>
 
 ## 目标
@@ -16,4 +16,4 @@
 - [x] composition 期间和 `keyCode 229` 的 Enter 不发送任务。
 - [x] 不覆盖其他输入法和非 Linux 平台。
 - [x] 本地人工输入中文通过。
-- [ ] 自动化检查及 X11、Wayland smoke 通过。
+- [x] 自动化检查及 X11、Wayland smoke 通过。
