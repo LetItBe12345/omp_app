@@ -10,6 +10,7 @@ import {
 import { basename, dirname, join } from 'node:path'
 import type {
   ApprovalMode,
+  RuntimeNetworkConfig,
   SessionSummary,
   WorkspaceOverview,
   WorkspaceSummary
@@ -188,6 +189,33 @@ export class DesktopStateStore {
       delete this.#state.sessionPreferences[id]
       if (this.#state.activeWorkspaceId === id)
         this.#state.activeWorkspaceId = undefined
+    })
+  }
+
+  runtimeNetworkConfig(): RuntimeNetworkConfig {
+    const value = this.#state.ui['runtimeNetwork']
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+      return { mode: 'auto' }
+    const record = value as Record<string, unknown>
+    const mode =
+      record['mode'] === 'off' ||
+      record['mode'] === 'auto' ||
+      record['mode'] === 'manual'
+        ? record['mode']
+        : 'auto'
+    const manualPort =
+      typeof record['manualPort'] === 'number' &&
+      Number.isInteger(record['manualPort']) &&
+      record['manualPort'] >= 1 &&
+      record['manualPort'] <= 65_535
+        ? record['manualPort']
+        : undefined
+    return { mode, ...(manualPort ? { manualPort } : {}) }
+  }
+
+  async setRuntimeNetworkConfig(config: RuntimeNetworkConfig): Promise<void> {
+    await this.#commit(() => {
+      this.#state.ui['runtimeNetwork'] = { ...config }
     })
   }
 

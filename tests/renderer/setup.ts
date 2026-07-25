@@ -101,6 +101,48 @@ if (typeof window !== 'undefined') {
           queuedMessageCount: 0
         }
       }),
+      getRuntimeNetwork: vi.fn().mockResolvedValue({
+        ok: true,
+        data: {
+          config: { mode: 'auto' },
+          source: 'login-shell',
+          result: 'direct'
+        }
+      }),
+      applyRuntimeNetwork: vi.fn().mockResolvedValue({
+        ok: true,
+        data: {
+          config: { mode: 'auto' },
+          source: 'login-shell',
+          result: 'direct'
+        }
+      }),
+      detectRuntimeProxy: vi.fn().mockResolvedValue({
+        ok: true,
+        data: {
+          config: { mode: 'auto' },
+          source: 'login-shell',
+          result: 'direct'
+        }
+      }),
+      checkRuntimeProxyPort: vi
+        .fn()
+        .mockResolvedValue({ ok: true, data: true }),
+      getRuntimeEnvironmentDiagnostic: vi.fn().mockResolvedValue({
+        ok: true,
+        data: {
+          shell: '/bin/bash',
+          path: '/usr/bin',
+          source: 'login-shell',
+          tools: [],
+          network: {
+            config: { mode: 'auto' },
+            source: 'login-shell',
+            result: 'direct'
+          },
+          copyText: 'Shell: /bin/bash'
+        }
+      }),
       getMessages: vi.fn().mockResolvedValue({ ok: true, data: [] }),
       getLoginProviders: vi.fn().mockResolvedValue({ ok: true, data: [] }),
       getAvailableModels: vi.fn().mockResolvedValue({ ok: true, data: [] }),

@@ -11,7 +11,9 @@ function createStateStore(): DesktopStateStore {
       workspaces: [],
       sessionPreferences: {},
       ui: {}
-    }
+    },
+    runtimeNetworkConfig: vi.fn().mockReturnValue({ mode: 'auto' }),
+    setRuntimeNetworkConfig: vi.fn()
   } as unknown as DesktopStateStore
 }
 
@@ -422,6 +424,7 @@ describe('registerRuntimeIpc', () => {
         ui: {}
       },
       addWorkspace: vi.fn().mockResolvedValue(workspace),
+      runtimeNetworkConfig: vi.fn().mockReturnValue({ mode: 'auto' }),
       overview: vi.fn().mockReturnValue({
         activeWorkspaceId: workspace.id,
         workspaces: [
@@ -448,7 +451,18 @@ describe('registerRuntimeIpc', () => {
     const cleanup = registerRuntimeIpc(
       harness.supervisor as unknown as RuntimeSupervisor,
       stateStore,
-      harness.getWindow
+      harness.getWindow,
+      undefined,
+      {
+        resolve: vi.fn().mockResolvedValue({
+          env: { PATH: '/usr/bin' },
+          network: {
+            config: { mode: 'auto' },
+            source: 'login-shell',
+            result: 'direct'
+          }
+        })
+      } as never
     )
 
     const result = await Promise.race([
@@ -473,7 +487,13 @@ describe('registerRuntimeIpc', () => {
         }
       }
     })
-    expect(harness.supervisor.start).toHaveBeenCalledWith(workspace.path)
+    await vi.waitFor(() => {
+      expect(harness.supervisor.start).toHaveBeenCalledWith(
+        workspace.path,
+        expect.any(Object),
+        'yolo'
+      )
+    })
     expect(electron.showOpenDialog).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ defaultPath: '/tmp' })

@@ -321,7 +321,8 @@ export class RuntimeSupervisor extends EventEmitter {
   }
 
   async restart(
-    approvalMode: ApprovalMode = this.#snapshot.approvalMode ?? 'yolo'
+    approvalMode: ApprovalMode = this.#snapshot.approvalMode ?? 'yolo',
+    env: NodeJS.ProcessEnv = this.#workspaceEnv
   ): Promise<RuntimeSnapshot> {
     const workspacePath = this.#snapshot.workspacePath
     if (!workspacePath) {
@@ -329,11 +330,7 @@ export class RuntimeSupervisor extends EventEmitter {
     }
     const sessionPath = this.#snapshot.sessionPath
     await this.stop()
-    const snapshot = await this.start(
-      workspacePath,
-      this.#workspaceEnv,
-      approvalMode
-    )
+    const snapshot = await this.start(workspacePath, env, approvalMode)
     if (sessionPath) await this.#restoreSession(sessionPath)
     return this.snapshot.status === 'ready' ? this.snapshot : snapshot
   }

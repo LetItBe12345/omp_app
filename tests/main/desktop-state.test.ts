@@ -6,6 +6,25 @@ import { describe, expect, it } from 'vitest'
 import { DesktopStateStore } from '../../src/main/desktop-state'
 
 describe('DesktopStateStore', () => {
+  it('全局保存代理模式并保留上次手动端口', async () => {
+    const root = join(tmpdir(), `omp-network-${process.pid}-${Date.now()}`)
+    await mkdir(root, { recursive: true })
+    const path = join(root, 'desktop-state.json')
+    const store = new DesktopStateStore(path)
+    await store.load()
+    expect(store.runtimeNetworkConfig()).toEqual({ mode: 'auto' })
+
+    await store.setRuntimeNetworkConfig({ mode: 'manual', manualPort: 7890 })
+    await store.setRuntimeNetworkConfig({ mode: 'off', manualPort: 7890 })
+
+    const reloaded = new DesktopStateStore(path)
+    await reloaded.load()
+    expect(reloaded.runtimeNetworkConfig()).toEqual({
+      mode: 'off',
+      manualPort: 7890
+    })
+  })
+
   it('生成稳定 Workspace ID 并使用 0600 原子配置', async () => {
     const root = join(tmpdir(), `omp-state-${process.pid}-${Date.now()}`)
     const workspace = join(root, 'workspace')

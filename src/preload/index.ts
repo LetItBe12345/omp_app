@@ -141,6 +141,14 @@ const desktopApi: DesktopApi = {
   },
   prompt: (input) => ipcRenderer.invoke(IPC_CHANNELS.prompt, input),
   restartRuntime: () => ipcRenderer.invoke(IPC_CHANNELS.restartRuntime),
+  getRuntimeNetwork: () => ipcRenderer.invoke(IPC_CHANNELS.getRuntimeNetwork),
+  applyRuntimeNetwork: (config) =>
+    ipcRenderer.invoke(IPC_CHANNELS.applyRuntimeNetwork, config),
+  detectRuntimeProxy: () => ipcRenderer.invoke(IPC_CHANNELS.detectRuntimeProxy),
+  checkRuntimeProxyPort: (port) =>
+    ipcRenderer.invoke(IPC_CHANNELS.checkRuntimeProxyPort, port),
+  getRuntimeEnvironmentDiagnostic: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.getRuntimeEnvironmentDiagnostic),
   reopenProviderLoginUrl: () =>
     ipcRenderer.invoke(IPC_CHANNELS.reopenProviderLoginUrl),
   respondExtensionUi: (id: string, response: ExtensionUiResponse) =>

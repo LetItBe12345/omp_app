@@ -79,6 +79,42 @@ function renderControls({
 }
 
 describe('ModelControls', () => {
+  it('手动代理校验端口并应用后重启 Runtime', async () => {
+    renderControls({
+      runtimeState: {
+        ...runtime,
+        workspacePath: '/tmp/workspace'
+      }
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Runtime 代理' }))
+    await screen.findByText('代理：手动')
+    fireEvent.click(screen.getByText('代理：手动'))
+    const input = screen.getByRole('textbox', {
+      name: '本地 HTTP 代理端口'
+    })
+    fireEvent.change(input, { target: { value: '7890' } })
+    fireEvent.click(screen.getByRole('button', { name: '应用并重启' }))
+
+    await waitFor(() =>
+      expect(window.desktop.applyRuntimeNetwork).toHaveBeenCalledWith({
+        mode: 'manual',
+        manualPort: 7890
+      })
+    )
+  })
+
+  it('任务运行和 Provider 登录期间禁用代理控件', () => {
+    const first = renderControls({
+      runtimeState: { ...runtime, isStreaming: true }
+    })
+    expect(screen.getByRole('button', { name: 'Runtime 代理' })).toBeDisabled()
+    first.unmount()
+
+    renderControls({ loginState: { status: 'opening-browser' } })
+    expect(screen.getByRole('button', { name: 'Runtime 代理' })).toBeDisabled()
+  })
+
   it('显示 Session 权限并立即提交选择', async () => {
     renderControls({
       runtimeState: {

@@ -24,6 +24,7 @@ import type {
   RuntimeSnapshot
 } from '../shared/desktop-api'
 import { APPROVAL_MODES, APPROVAL_MODE_LABELS } from '../shared/approval-mode'
+import { RuntimeNetworkControl } from './runtime-network-control'
 
 const thinkingLabels: Record<string, string> = {
   minimal: '最低',
@@ -431,6 +432,12 @@ export function ModelControls({
             </Popover.Content>
           </Popover.Portal>
         </Popover.Root>
+
+        <RuntimeNetworkControl
+          loginActive={isLoginActive(loginState)}
+          onSnapshot={onSnapshot}
+          runtime={runtime}
+        />
 
         {runtime.pendingModelSelection && (
           <button
