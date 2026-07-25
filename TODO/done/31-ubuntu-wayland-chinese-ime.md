@@ -1,6 +1,6 @@
 # Issue 31：Ubuntu Wayland 中文输入法
 
-- 状态：进行中
+- 状态：已完成
 - GitHub Issue：<https://github.com/LetItBe12345/omp_app/issues/31>
 
 ## 目标
@@ -13,4 +13,4 @@
 - [x] Wayland 启动时传入 `enable-wayland-ime` 和 text-input-v3。
 - [x] composition 期间和 `keyCode 229` 的 Enter 不发送任务。
 - [x] X11 行为不变。
-- [ ] 自动化检查和 Wayland smoke 通过。
+- [x] 自动化检查和 Wayland smoke 通过。
