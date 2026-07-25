@@ -51,6 +51,7 @@ export GTK_IM_MODULE=ibus
 export XMODIFIERS=@im=ibus
 
 if [[ "$display_server" == "x11" ]]; then
+  export XDG_SESSION_TYPE=x11
   xvfb-run \
     -a \
     --server-args='-screen 0 1440x900x24 -nolisten tcp' \
