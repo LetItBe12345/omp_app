@@ -33,11 +33,12 @@ let shutdownStarted = false
 let cleanupWorkspaceFiles: (() => void) | undefined
 
 configureLinuxFileChooser(app.commandLine)
-configureLinuxInputMethod(app.commandLine)
+const linuxInputMethod = configureLinuxInputMethod(app.commandLine)
 app.setName('OMP Desktop')
 app.setPath('userData', join(app.getPath('appData'), 'OMP Desktop'))
 app.setAppLogsPath()
 initializeLogger()
+log.info('Linux 输入法配置', { backend: linuxInputMethod })
 
 const runtimePath = app.isPackaged
   ? join(process.resourcesPath, 'runtime', 'omp')

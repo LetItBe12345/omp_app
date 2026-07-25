@@ -47,8 +47,11 @@ trap cleanup EXIT
 export ELECTRON_DISABLE_SECURITY_WARNINGS=true
 export OMP_DISPLAY_SERVER="$display_server"
 export OMP_SMOKE_SCREENSHOT="$screenshot_path"
+export GTK_IM_MODULE=ibus
+export XMODIFIERS=@im=ibus
 
 if [[ "$display_server" == "x11" ]]; then
+  export XDG_SESSION_TYPE=x11
   xvfb-run \
     -a \
     --server-args='-screen 0 1440x900x24 -nolisten tcp' \
@@ -91,6 +94,14 @@ fi
 
 if [[ ! -s "$screenshot_path" ]]; then
   echo "Smoke 未生成截图：$screenshot_path" >&2
+  exit 1
+fi
+
+app_log="$HOME/.config/OMP Desktop/logs/main.log"
+expected_input_backend="$([[ "$display_server" == "wayland" ]] && echo wayland || echo xim)"
+if ! grep -F "backend: '$expected_input_backend'" "$app_log" >/dev/null; then
+  echo "输入法后端不符合预期：display=$display_server expected=$expected_input_backend" >&2
+  tail -n 80 "$app_log" >&2
   exit 1
 fi
 
