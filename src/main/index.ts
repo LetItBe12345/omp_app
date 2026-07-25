@@ -22,6 +22,7 @@ import { RuntimeEnvironmentResolver } from './runtime-environment'
 import { listWorkspaceSessions } from './session-catalog'
 import { installNavigationSecurity, installSessionSecurity } from './security'
 import { configureLinuxFileChooser } from './linux-file-chooser'
+import { configureLinuxInputMethod } from './linux-input-method'
 import { registerWorkspaceFilesIpc } from './workspace-files'
 
 const development = Boolean(process.env['ELECTRON_RENDERER_URL'])
@@ -32,6 +33,7 @@ let shutdownStarted = false
 let cleanupWorkspaceFiles: (() => void) | undefined
 
 configureLinuxFileChooser(app.commandLine)
+configureLinuxInputMethod(app.commandLine)
 app.setName('OMP Desktop')
 app.setPath('userData', join(app.getPath('appData'), 'OMP Desktop'))
 app.setAppLogsPath()

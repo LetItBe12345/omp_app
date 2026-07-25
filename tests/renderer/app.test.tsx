@@ -357,6 +357,38 @@ describe('App shell', () => {
     finishPrompt?.({ ok: true, data: undefined })
   })
 
+  it('中文输入法组合和候选确认期间 Enter 不发送任务', async () => {
+    vi.mocked(window.desktop.getRuntimeState).mockResolvedValue({
+      ok: true,
+      data: {
+        status: 'ready',
+        workspacePath: '/tmp/workspace',
+        sessionId: 'session-1',
+        isStreaming: false,
+        queuedMessageCount: 0
+      }
+    })
+    render(<App />)
+    const composer = await screen.findByRole('textbox', { name: '任务输入' })
+    fireEvent.change(composer, { target: { value: '中文输入' } })
+
+    fireEvent.compositionStart(composer)
+    fireEvent.keyDown(composer, { key: 'Enter', isComposing: true })
+    expect(window.desktop.prompt).not.toHaveBeenCalled()
+
+    fireEvent.compositionEnd(composer)
+    fireEvent.keyDown(composer, { key: 'Enter', keyCode: 229 })
+    expect(window.desktop.prompt).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(composer, { key: 'Enter', keyCode: 13 })
+    await waitFor(() =>
+      expect(window.desktop.prompt).toHaveBeenCalledWith({
+        message: '中文输入',
+        references: []
+      })
+    )
+  })
+
   it('当前模型从可用目录消失时阻止发送并打开模型选择器', async () => {
     vi.mocked(window.desktop.getRuntimeState).mockResolvedValueOnce({
       ok: true,

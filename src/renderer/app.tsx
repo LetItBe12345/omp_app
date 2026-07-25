@@ -264,6 +264,7 @@ function Conversation({
     !runtime.isAuthenticating &&
     currentModelAvailable
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
+  const composerComposingRef = useRef(false)
   const suppressComposerSelectionSyncRef = useRef(false)
   const [composerSelection, setComposerSelection] = useState<number | null>(
     null
@@ -659,6 +660,12 @@ function Conversation({
               setSlashSelectionIndex(0)
               onInput(event.target.value)
             }}
+            onCompositionEnd={() => {
+              composerComposingRef.current = false
+            }}
+            onCompositionStart={() => {
+              composerComposingRef.current = true
+            }}
             onKeyDown={(event) => {
               if (slashMenuOpen && event.key === 'Escape') {
                 event.preventDefault()
@@ -704,7 +711,9 @@ function Conversation({
               if (
                 event.key === 'Enter' &&
                 !event.shiftKey &&
-                !event.nativeEvent.isComposing
+                !composerComposingRef.current &&
+                !event.nativeEvent.isComposing &&
+                event.nativeEvent.keyCode !== 229
               ) {
                 event.preventDefault()
                 if (
