@@ -48,14 +48,13 @@ OMP Desktop 不是完整 IDE。
 
 一级按 Workspace 分组。
 
-Workspace 内部只保留四组：
+Workspace 内部只保留三组：
 
-1. 正在运行
-2. 已置顶
-3. 会话
-4. 已归档
+1. 已置顶
+2. 会话
+3. 已归档
 
-“会话”包含未置顶且未归档的 Session，按最后修改时间倒序扁平排列，不再按今天、最近 7 天和更早分段。旧 Session 按每批 50 条继续加载。Session 行不显示时间，最后修改时间只用于排序。
+当前 Session 不单独建立“正在运行”分组，只使用选中背景表示。它仍按自身状态归入“已置顶”或“会话”。“会话”包含未置顶且未归档的 Session，按最后修改时间倒序扁平排列，不再按今天、最近 7 天和更早分段。旧 Session 按每批 50 条继续加载。Session 行不显示时间，最后修改时间只用于排序。
 
 Workspace 列表同样不使用日期分组标题。已置顶 Workspace 在前，置顶组和普通组内部都按 Workspace 加入 Desktop 的 `addedAt` 倒序。Workspace 创建后不会因为切换、使用或内部 Session 更新而改变相对位置。首次显示当前、已置顶和最近 7 天活跃的 Workspace；更早记录通过“更多”按每批 50 个加载。
 
@@ -71,6 +70,8 @@ MVP 不做复杂文件夹和多层标签系统。
 - 重命名会话。
 - 置顶和归档。
 - 保存、搜索和切换多个会话。
+
+Workspace 行悬停或键盘聚焦时，以小字号提示显示绝对路径。Session 重命名使用行内输入框，Enter 保存，Esc 或输入框失焦时取消。
 
 MVP 的一个活动 Workspace 只有一个长期运行的 OMP Runtime。同一时间只有当前 Session 可以生成。同一 Workspace 内通过 `new_session` 或 `switch_session` 顺序切换；权限变化时保持 Workspace 的 `cwd` 重启 Runtime。跨 Workspace 必须使用目标 Workspace 的 `--cwd` 启动新 Runtime。
 

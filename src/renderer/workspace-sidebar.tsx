@@ -25,23 +25,16 @@ type MenuTarget =
     }
 
 function groupSessions(
-  sessions: SessionSummary[],
-  runtime: RuntimeSnapshot
+  sessions: SessionSummary[]
 ): Array<{ title: string; sessions: SessionSummary[]; archived?: boolean }> {
-  const running = sessions.filter(
-    (session) => session.id === runtime.sessionId && !session.archived
-  )
   const pinned = sessions.filter(
-    (session) =>
-      session.pinned && !session.archived && session.id !== runtime.sessionId
+    (session) => session.pinned && !session.archived
   )
   const ordinary = sessions.filter(
-    (session) =>
-      !session.pinned && !session.archived && session.id !== runtime.sessionId
+    (session) => !session.pinned && !session.archived
   )
   const archived = sessions.filter((session) => session.archived)
   return [
-    { title: '正在运行', sessions: running },
     { title: '已置顶', sessions: pinned },
     { title: '会话', sessions: ordinary },
     { title: '已归档', sessions: archived, archived: true }
@@ -94,6 +87,10 @@ export function WorkspaceSidebar({
   openingWorkspace: boolean
 }): React.JSX.Element {
   const [menu, setMenu] = useState<MenuTarget | null>(null)
+  const [renaming, setRenaming] = useState<{
+    id: string
+    title: string
+  } | null>(null)
   const activeWorkspace = overview.workspaces.find(
     (workspace) => workspace.id === overview.activeWorkspaceId
   )
@@ -170,7 +167,7 @@ export function WorkspaceSidebar({
             {overview.workspaces.map((workspace) => (
               <li key={workspace.id}>
                 <button
-                  className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm ${
+                  className={`group relative flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm ${
                     workspace.id === overview.activeWorkspaceId
                       ? 'bg-[var(--surface-selected)]'
                       : ''
@@ -198,6 +195,7 @@ export function WorkspaceSidebar({
                         pinned: workspace.pinned
                       })
                   }}
+                  title={workspace.path}
                   type="button"
                 >
                   <Folder size={15} />
@@ -208,6 +206,12 @@ export function WorkspaceSidebar({
                       不可用
                     </span>
                   )}
+                  <span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute top-full left-2 z-40 mt-1 hidden max-w-[min(22rem,calc(100vw-2rem))] rounded-md border border-[var(--border)] bg-white px-2 py-1 text-[10px] leading-4 break-all text-[var(--text-secondary)] shadow-md group-hover:block group-focus-visible:block"
+                  >
+                    {workspace.path}
+                  </span>
                 </button>
               </li>
             ))}
@@ -236,7 +240,7 @@ export function WorkspaceSidebar({
                 value={search}
               />
             </label>
-            {groupSessions(sessions, runtime).map((group) => {
+            {groupSessions(sessions).map((group) => {
               if (group.sessions.length === 0) return null
               const hidden = group.archived && !archivedExpanded
               return (
@@ -256,31 +260,51 @@ export function WorkspaceSidebar({
                     <ul className="space-y-1">
                       {group.sessions.map((session) => (
                         <li key={session.id}>
-                          <button
-                            className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm ${
-                              session.id === runtime.sessionId
-                                ? 'bg-[var(--surface-selected)]'
-                                : ''
-                            }`}
-                            disabled={
-                              session.compatibility === 'corrupt' ||
-                              session.compatibility === 'future'
-                            }
-                            onClick={() => onSwitchSession(session.id)}
-                            onContextMenu={(event) =>
-                              openMenu(event, {
-                                kind: 'session',
-                                id: session.id,
-                                pinned: session.pinned,
-                                archived: session.archived,
-                                title: session.title
-                              })
-                            }
-                            onKeyDown={(event) => {
-                              if (
-                                event.key === 'ContextMenu' ||
-                                (event.shiftKey && event.key === 'F10')
-                              )
+                          {renaming?.id === session.id ? (
+                            <form
+                              className="flex items-center gap-2 rounded-lg bg-[var(--surface-selected)] px-2.5 py-1.5"
+                              onSubmit={(event) => {
+                                event.preventDefault()
+                                const title = renaming.title.trim()
+                                if (title && title !== session.title)
+                                  onRenameSession(session.id, title)
+                                setRenaming(null)
+                              }}
+                            >
+                              <MessageSquare size={14} />
+                              <input
+                                aria-label={`重命名 ${session.title}`}
+                                autoFocus
+                                className="min-w-0 flex-1 rounded border border-[var(--border)] bg-white px-1.5 py-0.5 text-sm outline-none focus:border-[var(--text-muted)]"
+                                onChange={(event) =>
+                                  setRenaming({
+                                    id: session.id,
+                                    title: event.target.value
+                                  })
+                                }
+                                onBlur={() => setRenaming(null)}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Escape') {
+                                    event.preventDefault()
+                                    setRenaming(null)
+                                  }
+                                }}
+                                value={renaming.title}
+                              />
+                            </form>
+                          ) : (
+                            <button
+                              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm ${
+                                session.id === runtime.sessionId
+                                  ? 'bg-[var(--surface-selected)]'
+                                  : ''
+                              }`}
+                              disabled={
+                                session.compatibility === 'corrupt' ||
+                                session.compatibility === 'future'
+                              }
+                              onClick={() => onSwitchSession(session.id)}
+                              onContextMenu={(event) =>
                                 openMenu(event, {
                                   kind: 'session',
                                   id: session.id,
@@ -288,16 +312,30 @@ export function WorkspaceSidebar({
                                   archived: session.archived,
                                   title: session.title
                                 })
-                            }}
-                            title={session.path}
-                            type="button"
-                          >
-                            <MessageSquare size={14} />
-                            <span className="truncate">{session.title}</span>
-                            {session.pinned && (
-                              <Pin className="ml-auto" size={11} />
-                            )}
-                          </button>
+                              }
+                              onKeyDown={(event) => {
+                                if (
+                                  event.key === 'ContextMenu' ||
+                                  (event.shiftKey && event.key === 'F10')
+                                )
+                                  openMenu(event, {
+                                    kind: 'session',
+                                    id: session.id,
+                                    pinned: session.pinned,
+                                    archived: session.archived,
+                                    title: session.title
+                                  })
+                              }}
+                              title={session.path}
+                              type="button"
+                            >
+                              <MessageSquare size={14} />
+                              <span className="truncate">{session.title}</span>
+                              {session.pinned && (
+                                <Pin className="ml-auto" size={11} />
+                              )}
+                            </button>
+                          )}
                         </li>
                       ))}
                     </ul>
@@ -353,8 +391,7 @@ export function WorkspaceSidebar({
               <button
                 className="w-full rounded px-3 py-2 text-left hover:bg-[var(--surface-selected)]"
                 onClick={() => {
-                  const title = window.prompt('会话名称', menu.title)
-                  if (title) onRenameSession(menu.id, title)
+                  setRenaming({ id: menu.id, title: menu.title })
                   setMenu(null)
                 }}
                 role="menuitem"
