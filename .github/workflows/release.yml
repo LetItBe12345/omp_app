@@ -50,7 +50,15 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - name: Install, verify Runtime and build
-        run: pnpm install --frozen-lockfile && pnpm runtime:download && pnpm check && pnpm build
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          runtime_url="$(node -p "JSON.parse(require('fs').readFileSync('runtime/manifest.json', 'utf8')).url")"
+          curl --fail --location --retry 3 --retry-delay 2 "$runtime_url" -o runtime/omp
+          chmod 0755 runtime/omp
+          pnpm runtime:check
+          pnpm check
+          pnpm build
       - name: Run hardware GPU smoke
         shell: bash
         run: |
