@@ -2,9 +2,11 @@ import { spawn } from 'node:child_process'
 import { access } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import process from 'node:process'
-import electronBinary from 'electron'
-
-await access('out/main/index.js', constants.R_OK)
+const packagedExecutable = process.env.OMP_SMOKE_EXECUTABLE
+const electronBinary = packagedExecutable
+  ? undefined
+  : (await import('electron')).default
+if (!packagedExecutable) await access('out/main/index.js', constants.R_OK)
 
 const useXvfb = process.platform === 'linux' && !process.env.DISPLAY
 const displayServer = process.env.OMP_DISPLAY_SERVER
@@ -28,25 +30,29 @@ const explicitElectronArgs =
       ? ['--ozone-platform=wayland']
       : []
 if (softwareRendering) explicitElectronArgs.push('--disable-gpu')
+const entrypoint = packagedExecutable ? undefined : 'out/main/index.js'
+const smokeArgs = entrypoint
+  ? [...explicitElectronArgs, entrypoint, '--smoke']
+  : [...explicitElectronArgs, '--smoke']
 const command = displayServer
-  ? electronBinary
+  ? (packagedExecutable ?? electronBinary)
   : useXvfb
     ? 'xvfb-run'
-    : electronBinary
+    : (packagedExecutable ?? electronBinary)
 const args = displayServer
-  ? [...explicitElectronArgs, 'out/main/index.js', '--smoke']
+  ? smokeArgs
   : useXvfb
     ? [
         '-a',
-        electronBinary,
+        packagedExecutable ?? electronBinary,
         '--ozone-platform=x11',
-        'out/main/index.js',
+        ...(entrypoint ? [entrypoint] : []),
         '--smoke'
       ]
-    : ['out/main/index.js', '--smoke']
+    : smokeArgs
 
 console.log(
-  `Electron smoke 环境：arch=${process.arch} display=${displayServer ?? (useXvfb ? 'x11-xvfb' : 'auto')} rendering=${softwareRendering ? 'software' : 'default'} shutdown=${terminateOnReady ? 'forced-after-ready' : 'normal'}`
+  `Electron smoke 环境：arch=${process.arch} display=${displayServer ?? (useXvfb ? 'x11-xvfb' : 'auto')} executable=${packagedExecutable ?? 'source'} rendering=${softwareRendering ? 'software' : 'default'} shutdown=${terminateOnReady ? 'forced-after-ready' : 'normal'}`
 )
 
 const child = spawn(command, args, {

@@ -3,10 +3,11 @@
 set -euo pipefail
 
 display_server="${1:-}"
+smoke_executable="${2:-${OMP_SMOKE_EXECUTABLE:-}}"
 case "$display_server" in
   x11 | wayland) ;;
   *)
-    echo "用法：$0 <x11|wayland>" >&2
+    echo "用法：$0 <x11|wayland> [executable]" >&2
     exit 2
     ;;
 esac
@@ -14,8 +15,10 @@ esac
 artifact_dir="${RUNNER_TEMP:-/tmp}/omp-ci"
 screenshot_path="$PWD/tests/artifacts/${display_server}-smoke.png"
 weston_pid=""
+smoke_home="$artifact_dir/home"
 
-mkdir -p "$artifact_dir" tests/artifacts
+mkdir -p "$artifact_dir" tests/artifacts "$smoke_home"
+export HOME="$smoke_home"
 
 cleanup() {
   local exit_code=$?
@@ -30,7 +33,7 @@ cleanup() {
     cp "$app_log" "$artifact_dir/main.log"
   fi
 
-  pgrep -a -f '/electron/dist/electron' >"$artifact_dir/electron-processes-after.txt" || true
+  pgrep -a -f '(/electron/dist/electron|/omp-desktop)' >"$artifact_dir/electron-processes-after.txt" || true
   exit "$exit_code"
 }
 trap cleanup EXIT
@@ -39,8 +42,12 @@ trap cleanup EXIT
   uname -a
   cat /etc/os-release
   printf 'node=%s\n' "$(node --version)"
-  printf 'pnpm=%s\n' "$(pnpm --version)"
-  printf 'electron=%s\n' "$(node -p "require('./node_modules/electron/package.json').version")"
+  printf 'pnpm=%s\n' "$(pnpm --version 2>/dev/null || echo packaged)"
+  if [[ -f node_modules/electron/package.json ]]; then
+    printf 'electron=%s\n' "$(node -p "require('./node_modules/electron/package.json').version")"
+  else
+    printf 'electron=packaged\n'
+  fi
   printf 'display=%s\n' "$display_server"
 } >"$artifact_dir/environment.txt"
 
@@ -52,10 +59,13 @@ export XMODIFIERS=@im=ibus
 
 if [[ "$display_server" == "x11" ]]; then
   export XDG_SESSION_TYPE=x11
-  xvfb-run \
-    -a \
-    --server-args='-screen 0 1440x900x24 -nolisten tcp' \
-    pnpm smoke
+  smoke_command=(node scripts/electron-smoke.mjs)
+  if [[ -n "$smoke_executable" ]]; then
+    export OMP_SMOKE_EXECUTABLE="$smoke_executable"
+  else
+    smoke_command=(pnpm smoke)
+  fi
+  xvfb-run -a --server-args='-screen 0 1440x900x24 -nolisten tcp' "${smoke_command[@]}"
 else
   unset DISPLAY
   export XDG_SESSION_TYPE=wayland
@@ -89,7 +99,12 @@ else
     exit 1
   fi
 
-  pnpm smoke
+  if [[ -n "$smoke_executable" ]]; then
+    export OMP_SMOKE_EXECUTABLE="$smoke_executable"
+    node scripts/electron-smoke.mjs
+  else
+    pnpm smoke
+  fi
 fi
 
 if [[ ! -s "$screenshot_path" ]]; then
@@ -105,9 +120,9 @@ if ! grep -F "backend: '$expected_input_backend'" "$app_log" >/dev/null; then
   exit 1
 fi
 
-if pgrep -f '/electron/dist/electron' >/dev/null; then
+if pgrep -f '(/electron/dist/electron|/omp-desktop)' >/dev/null; then
   echo 'Smoke 结束后仍有 Electron 进程残留' >&2
-  pgrep -a -f '/electron/dist/electron' >&2 || true
+  pgrep -a -f '(/electron/dist/electron|/omp-desktop)' >&2 || true
   exit 1
 fi
 

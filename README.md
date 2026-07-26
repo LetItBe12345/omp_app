@@ -1,24 +1,105 @@
 # OMP Desktop
 
-OMP Desktop 是 OMP 的 Linux 桌面客户端。首个发布版只提供 Ubuntu 22.04/24.04、x86-64 的 AppImage 和 `.deb`，内置 OMP `v17.1.0`。
+面向本地项目的 OMP Agent 桌面客户端。把 Workspace、会话、文件和 Agent 任务放在同一个 Ubuntu 原生窗口中。
 
-## 使用
+**[下载最新版本](https://github.com/LetItBe12345/omp_app/releases/latest)** · [安装说明](docs/ubuntu-installation.md) · [提交问题](https://github.com/LetItBe12345/omp_app/issues)
 
-1. 从 GitHub Release 下载 `omp-desktop-*-linux-x64.AppImage` 或 `.deb`，按 [Ubuntu 安装说明](docs/ubuntu-installation.md) 校验 SHA-256 并安装。
-2. 第一次没有 Provider 凭据时，在终端运行 `omp-desktop --setup-provider`。这会启动内置 OMP 的交互终端；按 OMP 的提示完成 Provider 登录，然后退出。Desktop 不读取或保存 Token。
-3. 正常运行 `omp-desktop`，选择 Workspace，新建 Session，在模型选择器中选择模型并发送 Prompt。后续新增 Provider 或重新登录在 GUI 中完成。
-4. 图形驱动黑屏时可从终端运行 `omp-desktop --disable-gpu`；该参数只对本次启动生效。
-5. 卸载 `.deb` 使用 `sudo apt remove omp-desktop`。卸载不会删除 Workspace、Session、Runtime 设置或日志；重新安装后会继续使用这些数据。
+[![Release](https://img.shields.io/github/v/release/LetItBe12345/omp_app?label=release)](https://github.com/LetItBe12345/omp_app/releases/latest)
+[![CI](https://github.com/LetItBe12345/omp_app/actions/workflows/ci.yml/badge.svg)](https://github.com/LetItBe12345/omp_app/actions/workflows/ci.yml)
+[![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04%20%7C%2024.04-E95420)](docs/ubuntu-installation.md)
+[![License](https://img.shields.io/badge/license-MIT-2f2f2f)](LICENSE)
 
-安装包、Runtime 和详细验收步骤见 [发布验收](docs/release-acceptance.md)；维护者发布流程见 [发布流程](docs/releasing.md)。
+<p align="center">
+  <img src="docs/assets/omp-desktop-workspace.png" width="100%" alt="OMP Desktop 在 Ubuntu Wayland 中管理 Workspace、文件树和 Agent 会话" />
+</p>
+
+<p align="center"><sub>Ubuntu 24.04 · Wayland · 三栏 Workspace 工作界面</sub></p>
+
+OMP Desktop 不是一个新的 IDE。它是 OMP 的图形工作台，让你在不离开项目上下文的情况下管理会话、选择文件、发送任务，并查看 Agent 的流式输出、Thinking、Tool Call 和权限请求。
+
+## 当前能力
+
+- 管理多个本地 Workspace，以及各 Workspace 下的会话。
+- 在独立文件栏中浏览和搜索当前项目，将文件、目录或历史会话加入上下文。
+- 查看流式回答、Thinking、工具执行状态和 Permission 请求。
+- 选择模型、Thinking 等级和执行权限，支持 Stop 与逐条 Follow-up。
+- 自动恢复上次 Workspace、会话、草稿和 Runtime 设置。
+- 为 OMP Runtime 单独配置直连、自动代理或手动 HTTP 代理，不要求开启系统全局代理。
+- 内置固定版本的 OMP Runtime，安装后不再下载应用组件。
+
+## 安装
+
+当前正式支持 Ubuntu 22.04 LTS、24.04 LTS x86-64。
+
+从 [GitHub Releases](https://github.com/LetItBe12345/omp_app/releases/latest) 下载 `.deb` 和对应的 `.sha256` 文件：
+
+```sh
+sha256sum -c omp-desktop-0.1.0-linux-x64.deb.sha256
+sudo apt install ./omp-desktop-0.1.0-linux-x64.deb
+```
+
+也可以下载 AppImage 直接运行。完整步骤、FUSE 要求和卸载方式见 [Ubuntu 安装说明](docs/ubuntu-installation.md)。
+
+## 首次使用
+
+第一次使用前，在终端配置 OMP Provider：
+
+```sh
+omp-desktop --setup-provider
+```
+
+这条命令会在当前终端启动应用内置的 OMP 配置界面。按提示完成 Provider 登录后退出，再从桌面启动器打开 OMP Desktop。
+
+Desktop 不读取或保存 Provider Token。凭据由 OMP 自己管理。
+
+进入应用后：
+
+1. 点击 Workspace 旁的 `+`，选择本地项目目录。
+2. 新建或打开一个会话。
+3. 等待底部 Runtime 状态变为就绪。
+4. 选择模型、Thinking 等级和权限模式，然后发送任务。
+5. 通过文件树或输入框的 `@` 引用补充项目上下文。
+
+遇到显卡驱动导致的黑屏时，可以用下面的命令进行临时诊断：
+
+```sh
+omp-desktop --disable-gpu
+```
+
+该参数只对本次启动生效，不是默认运行方式。
+
+## 产品边界
+
+当前版本聚焦本地 Agent 工作流，不提供应用内代码编辑器、Git Diff/Review、集成终端、多窗口或插件市场。命令和文件操作由本地 OMP Runtime 执行，并受当前权限模式控制。
+
+`v0.1.0` 已在 NVIDIA RTX 3090 原生 Wayland 环境完成硬件验收。Intel、AMD 和 X11 真实硬件环境尚未纳入本次正式验收范围。
 
 ## 开发
+
+需要 Node.js 24 和 pnpm 11：
 
 ```sh
 pnpm install
 pnpm runtime:download
 pnpm dev
-pnpm check
 ```
 
-`runtime/omp` 不提交到 Git。它由 `runtime/manifest.json` 固定的 URL 和 SHA-256 下载。生产构建使用 `pnpm package:linux`，只在 Linux x64 上生成 AppImage 和 `.deb`。
+提交前运行：
+
+```sh
+pnpm check
+pnpm build
+```
+
+`runtime/omp` 不提交到 Git。版本、下载地址和 SHA-256 固定在 `runtime/manifest.json`。Linux x64 打包命令：
+
+```sh
+pnpm package:linux
+pnpm package:check
+```
+
+架构和 RPC 说明见 [Desktop 架构](docs/desktop-architecture.md) 与 [OMP RPC](docs/OMP_RPC.md)。发布验收和维护者流程见 [发布验收](docs/release-acceptance.md) 与 [发布流程](docs/releasing.md)。
+
+## License
+
+[MIT](LICENSE)
