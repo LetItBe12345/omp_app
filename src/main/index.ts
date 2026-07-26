@@ -35,9 +35,16 @@ const supportedCliFlags = new Set([
   '--setup-provider',
   '--smoke'
 ])
+function isSupportedCliArg(arg: string): boolean {
+  return (
+    supportedCliFlags.has(arg) ||
+    arg === '--ozone-platform=x11' ||
+    arg === '--ozone-platform=wayland'
+  )
+}
 const unknownCliArgs = process.argv
   .slice(1)
-  .filter((arg) => arg.startsWith('--') && !supportedCliFlags.has(arg))
+  .filter((arg) => arg.startsWith('--') && !isSupportedCliArg(arg))
 let mainWindow: BrowserWindow | null = null
 let smokeFinishing = false
 let shutdownStarted = false
