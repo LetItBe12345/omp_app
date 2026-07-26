@@ -40,7 +40,7 @@ jobs:
           test "${XDG_SESSION_TYPE:-}" = wayland
           test -n "${WAYLAND_DISPLAY:-}"
           nvidia-smi --query-gpu=name --format=csv,noheader | tee gpu-name.txt
-          rg -i 'RTX 3090' gpu-name.txt
+          grep -Eiq 'RTX 3090' gpu-name.txt
       - name: Install pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
       - name: Install Node.js
