@@ -53,6 +53,8 @@ jobs:
         run: pnpm install --frozen-lockfile && pnpm runtime:download && pnpm check && pnpm build
       - name: Run hardware GPU smoke
         shell: bash
+        env:
+          CHROME_DEVEL_SANDBOX: /usr/share/typora/chrome-sandbox
         run: |
           set -euo pipefail
           mkdir -p tests/artifacts
