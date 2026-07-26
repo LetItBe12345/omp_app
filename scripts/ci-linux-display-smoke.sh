@@ -16,9 +16,15 @@ artifact_dir="${RUNNER_TEMP:-/tmp}/omp-ci"
 screenshot_path="$PWD/tests/artifacts/${display_server}-smoke.png"
 weston_pid=""
 smoke_home="$artifact_dir/home"
+smoke_config="$smoke_home/.config"
+smoke_data="$smoke_home/.local/share"
+smoke_cache="$smoke_home/.cache"
 
-mkdir -p "$artifact_dir" tests/artifacts "$smoke_home"
+mkdir -p "$artifact_dir" tests/artifacts "$smoke_home" "$smoke_config" "$smoke_data" "$smoke_cache"
 export HOME="$smoke_home"
+export XDG_CONFIG_HOME="$smoke_config"
+export XDG_DATA_HOME="$smoke_data"
+export XDG_CACHE_HOME="$smoke_cache"
 
 cleanup() {
   local exit_code=$?
@@ -28,7 +34,7 @@ cleanup() {
     wait "$weston_pid" 2>/dev/null || true
   fi
 
-  local app_log="$HOME/.config/OMP Desktop/logs/main.log"
+  local app_log="$XDG_CONFIG_HOME/OMP Desktop/logs/main.log"
   if [[ -f "$app_log" ]]; then
     cp "$app_log" "$artifact_dir/main.log"
   fi
@@ -112,7 +118,7 @@ if [[ ! -s "$screenshot_path" ]]; then
   exit 1
 fi
 
-app_log="$HOME/.config/OMP Desktop/logs/main.log"
+app_log="$XDG_CONFIG_HOME/OMP Desktop/logs/main.log"
 expected_input_backend="$([[ "$display_server" == "wayland" ]] && echo wayland || echo xim)"
 if ! grep -F "backend: '$expected_input_backend'" "$app_log" >/dev/null; then
   echo "输入法后端不符合预期：display=$display_server expected=$expected_input_backend" >&2
