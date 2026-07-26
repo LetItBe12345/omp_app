@@ -39,7 +39,10 @@ cleanup() {
     cp "$app_log" "$artifact_dir/main.log"
   fi
 
-  pgrep -a -f '(/electron/dist/electron|/omp-desktop)' >"$artifact_dir/electron-processes-after.txt" || true
+  {
+    pgrep -a -x omp-desktop || true
+    pgrep -a -f '/electron/dist/electron' || true
+  } | sort -u >"$artifact_dir/electron-processes-after.txt"
   exit "$exit_code"
 }
 trap cleanup EXIT
@@ -126,9 +129,13 @@ if ! grep -F "backend: '$expected_input_backend'" "$app_log" >/dev/null; then
   exit 1
 fi
 
-if pgrep -f '(/electron/dist/electron|/omp-desktop)' >/dev/null; then
+app_processes="$({
+  pgrep -a -x omp-desktop || true
+  pgrep -a -f '/electron/dist/electron' || true
+} | sort -u)"
+if [[ -n "$app_processes" ]]; then
   echo 'Smoke 结束后仍有 Electron 进程残留' >&2
-  pgrep -a -f '(/electron/dist/electron|/omp-desktop)' >&2 || true
+  printf '%s\n' "$app_processes" >&2
   exit 1
 fi
 
