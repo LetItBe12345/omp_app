@@ -32,6 +32,7 @@ const setupProviderMode = process.argv.includes('--setup-provider')
 const supportedCliFlags = new Set([
   '--version',
   '--disable-gpu',
+  '--no-sandbox',
   '--setup-provider',
   '--smoke'
 ])
