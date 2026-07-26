@@ -68,9 +68,20 @@ omp-desktop --disable-gpu
 
 该参数只对本次启动生效，不是默认运行方式。
 
-## 产品边界
+## Roadmap
 
-当前版本聚焦本地 Agent 工作流，不提供应用内代码编辑器、Git Diff/Review、集成终端、多窗口或插件市场。命令和文件操作由本地 OMP Runtime 执行，并受当前权限模式控制。
+- [x] Workspace、Session、文件上下文和流式 Agent 对话
+- [x] Tool Call、权限确认、模型选择和 Runtime 代理设置
+- [x] Ubuntu x64 AppImage 和 `.deb` 安装包
+- [ ] Changes / Review 面板和按文件查看 Diff
+- [ ] Accept、Revert、Open in Editor 和 `@diff` 上下文
+- [ ] 内置多标签 Terminal
+- [ ] 多 Session 并行运行和任务队列
+- [ ] 应用内文件预览和编辑
+- [ ] Browser Use、页面交互和独立代理环境
+- [ ] Ubuntu Wayland Computer Use
+
+Roadmap 按当前计划排序，不代表固定发布时间。命令和文件操作仍由本地 OMP Runtime 执行，并受当前权限模式控制。
 
 `v0.1.0` 已在 NVIDIA RTX 3090 原生 Wayland 环境完成硬件验收。Intel、AMD 和 X11 真实硬件环境尚未纳入本次正式验收范围。
 
