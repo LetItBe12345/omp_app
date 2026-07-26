@@ -1,5 +1,8 @@
 allowBuilds:
   electron: true
+  electron-winstaller: false
   esbuild: true
 minimumReleaseAgeExclude:
   - '@testing-library/jest-dom@7.0.0'
+overrides:
+  app-builder-lib>@electron/get: 3.1.0

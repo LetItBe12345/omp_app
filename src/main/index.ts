@@ -8,6 +8,7 @@ import {
   shell
 } from 'electron'
 import { writeFile } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import type { PerformanceEntry, RendererLogEntry } from '../shared/desktop-api'
 import { IPC_CHANNELS } from '../shared/desktop-api'
@@ -27,6 +28,16 @@ import { registerWorkspaceFilesIpc } from './workspace-files'
 
 const development = Boolean(process.env['ELECTRON_RENDERER_URL'])
 const smokeMode = process.argv.includes('--smoke')
+const setupProviderMode = process.argv.includes('--setup-provider')
+const supportedCliFlags = new Set([
+  '--version',
+  '--disable-gpu',
+  '--setup-provider',
+  '--smoke'
+])
+const unknownCliArgs = process.argv
+  .slice(1)
+  .filter((arg) => arg.startsWith('--') && !supportedCliFlags.has(arg))
 let mainWindow: BrowserWindow | null = null
 let smokeFinishing = false
 let shutdownStarted = false
@@ -42,7 +53,7 @@ log.info('Linux 输入法配置', { backend: linuxInputMethod })
 
 const runtimePath = app.isPackaged
   ? join(process.resourcesPath, 'runtime', 'omp')
-  : join(app.getAppPath(), 'runtime', 'omp')
+  : join(__dirname, '../../runtime/omp')
 const runtimeSupervisor = new RuntimeSupervisor({
   runtimePath,
   diagnostics: new RuntimeDiagnostics(join(app.getPath('logs'), 'runtime.log'))
@@ -53,6 +64,31 @@ const desktopStateStore = new DesktopStateStore(
   join(app.getPath('userData'), 'desktop-state.json'),
   runtimeStatePath
 )
+
+function runProviderSetup(): void {
+  const setupProfile = process.env['OMP_DESKTOP_SETUP_PROFILE']
+  const child = spawn(
+    runtimePath,
+    setupProfile ? ['--profile', setupProfile] : [],
+    {
+      cwd: process.cwd(),
+      env: { ...process.env, OMP_DESKTOP_PROVIDER_SETUP: '1' },
+      stdio: 'inherit'
+    }
+  )
+  child.once('error', (error) => {
+    log.error('启动 Provider 配置失败', error)
+    app.exit(1)
+  })
+  child.once('exit', (code, signal) => {
+    if (signal) {
+      log.error('Provider 配置被信号终止', { signal })
+      app.exit(1)
+      return
+    }
+    app.exit(code ?? 1)
+  })
+}
 
 async function restoreRuntimeState(): Promise<void> {
   const state = desktopStateStore.state
@@ -125,7 +161,10 @@ async function restoreRuntimeState(): Promise<void> {
   }
 }
 
-const hasSingleInstanceLock = app.requestSingleInstanceLock()
+const standaloneCliMode =
+  setupProviderMode || process.argv.includes('--version')
+const hasSingleInstanceLock =
+  standaloneCliMode || app.requestSingleInstanceLock()
 if (!hasSingleInstanceLock) app.quit()
 
 function registerIpc(): void {
@@ -182,6 +221,26 @@ async function finishSmoke(): Promise<void> {
       const image = await mainWindow.webContents.capturePage()
       await writeFile(screenshotPath, image.toPNG())
       log.info('Smoke 截图已保存', { screenshotPath })
+    }
+    const gpuAcceptancePath = process.env['OMP_GPU_ACCEPTANCE_OUTPUT']
+    if (gpuAcceptancePath) {
+      const gpuInfo = await app
+        .getGPUInfo('complete')
+        .catch((error: unknown) => ({ error: String(error) }))
+      await writeFile(
+        gpuAcceptancePath,
+        JSON.stringify(
+          {
+            generatedAt: new Date().toISOString(),
+            electronVersion: process.versions.electron,
+            chromeVersion: process.versions.chrome,
+            featureStatus: app.getGPUFeatureStatus(),
+            gpuInfo
+          },
+          null,
+          2
+        ) + '\n'
+      )
     }
     process.stdout.write('OMP_SMOKE_READY\n', () => app.exit(0))
   } catch (error) {
@@ -320,6 +379,20 @@ process.on('unhandledRejection', (reason) => {
 
 if (hasSingleInstanceLock) {
   void app.whenReady().then(async () => {
+    if (unknownCliArgs.length > 0) {
+      console.error(`未知参数：${unknownCliArgs.join(' ')}`)
+      app.exit(2)
+      return
+    }
+    if (process.argv.includes('--version')) {
+      console.log(app.getVersion())
+      app.exit(0)
+      return
+    }
+    if (setupProviderMode) {
+      runProviderSetup()
+      return
+    }
     recordMainPerformance('app_ready')
     Menu.setApplicationMenu(null)
     await desktopStateStore.load()
