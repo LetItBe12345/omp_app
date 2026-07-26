@@ -1,0 +1,8 @@
+{
+  "version": "17.1.0",
+  "releaseTag": "v17.1.0",
+  "platform": "linux",
+  "arch": "x64",
+  "url": "https://github.com/can1357/oh-my-pi/releases/download/v17.1.0/omp-linux-x64",
+  "sha256": "6fd709eea626f92503737c5c6994d62483f88dd3df2454442daaf1982869d154"
+}

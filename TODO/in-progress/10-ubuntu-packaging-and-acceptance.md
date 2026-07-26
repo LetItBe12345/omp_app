@@ -1,6 +1,6 @@
 # MVP-10：Ubuntu 打包与 MVP 验收
 
-- 状态：未开始
+- 状态：进行中
 - 优先级：P0
 - 前置任务：MVP-09
 - 后续任务：无
@@ -49,30 +49,30 @@
 
 ### 打包
 
-- [ ] 使用 `electron-builder` 配置 Linux 构建。
-- [ ] 首先产出 AppImage。
-- [ ] 同时产出 `.deb`。
-- [ ] 只打包 Linux x64 的 `runtime/omp`。
-- [ ] 确保 OMP 二进制具有执行权限。
-- [ ] 实现 `omp-desktop --setup-provider`，在当前终端启动 bundled OMP TUI，并使用全新临时 OMP Profile 验证首次 Provider 配置。
-- [ ] 生产包排除测试、开发依赖、无用 source map 和参考仓库。
-- [ ] Main、Preload 和 Renderer 分别 bundle。
-- [ ] 使用 ASAR 管理应用代码，并正确解包原生依赖和 OMP。
-- [ ] 检查首屏 chunk 组成，确认模型管理、Markdown 高亮和后续大型能力没有意外进入首屏。
+- [x] 使用 `electron-builder` 配置 Linux 构建。
+- [x] 首先产出 AppImage。
+- [x] 同时产出 `.deb`。
+- [x] 只打包 Linux x64 的 `runtime/omp`。
+- [x] 确保 OMP 二进制具有执行权限。
+- [x] 实现 `omp-desktop --setup-provider`，在当前终端启动 bundled OMP TUI，并使用全新临时 OMP Profile 验证首次 Provider 配置。
+- [x] 生产包排除测试、开发依赖、无用 source map 和参考仓库。
+- [x] Main、Preload 和 Renderer 分别 bundle。
+- [x] 使用 ASAR 管理应用代码，并正确解包原生依赖和 OMP。
+- [x] 检查首屏 chunk 组成，确认模型管理、Markdown 高亮和后续大型能力没有意外进入首屏。
 
 ### Ubuntu 兼容
 
 - [ ] 在 Ubuntu Wayland 测试启动、窗口、剪贴板和文件选择器。
 - [ ] 在 Ubuntu X11 测试同一组主链路。
 - [ ] 测试 Intel、AMD 和 NVIDIA 常见图形环境。
-- [ ] GPU 默认开启。
+- [x] GPU 默认开启。
 - [ ] 提供重启后生效的图形兼容模式，不作为默认值。
-- [ ] 支持 `--disable-gpu` 作为黑屏时不依赖设置界面的救援入口。
+- [x] 支持 `--disable-gpu` 作为黑屏时不依赖设置界面的救援入口。
 - [ ] 记录显示协议、兼容模式、GPU Feature Status 和 GPU 进程异常。
 - [ ] 在真实 GPU 上测试长对话滚动、流式输出、弹窗、缩放、黑屏、闪烁和透明窗口；Headless 软件渲染结果不代替该项。
-- [ ] 增加与当前 commit、版本和本机环境绑定的 `gpu-acceptance.json` 生成与校验脚本。
-- [ ] 在 `docs/` 中记录真实 GPU 人工签收清单、操作步骤和失败处理。
-- [ ] CD 在本机原生 Wayland、RTX 3090 和硬件加速检查通过后才允许进入 Hosted Runner 构建阶段。
+- [x] 增加与当前 commit、版本和本机环境绑定的 `gpu-acceptance.json` 生成与校验脚本。
+- [x] 在 `docs/` 中记录真实 GPU 人工签收清单、操作步骤和失败处理。
+- [x] CD 在本机原生 Wayland、RTX 3090 和硬件加速检查通过后才允许进入 Hosted Runner 构建阶段。
 - [ ] 测试从图形启动器启动时的 Runtime PATH、Network Profile 和 OMP 发现。
 
 ### 性能回归
@@ -81,10 +81,10 @@
 - [ ] 记录 `interactive_ready` 和 `runtime_start`。
 - [ ] 记录 OMP `ready` 时间。
 - [ ] 记录首 token 延迟。
-- [ ] 记录首屏 Renderer JS gzip 大小。
+- [x] 记录首屏 Renderer JS gzip 大小。
 - [ ] 记录空闲 CPU 和内存。
-- [ ] 记录安装包和解压后大小。
-- [ ] 分别记录排除 Electron、bundled OMP 后的应用增量，以及完整安装包和安装后大小。
+- [x] 记录安装包和解压后大小。
+- [x] 分别记录排除 Electron、bundled OMP 后的应用增量，以及完整安装包和安装后大小。
 - [ ] 对比“创建窗口后立即启动 OMP”和“`renderer_ready` 后启动 OMP”的首屏、OMP ready、峰值 CPU 和内存，固定默认策略。
 - [ ] 冷启动和热启动分开测量，多次运行记录中位数。
 - [ ] 分别记录 Main、Renderer、GPU/Utility 和 OMP Runtime 的内存。
@@ -95,10 +95,10 @@
 
 ### 稳定性与资源边界
 
-- [ ] Runtime 日志写入队列设置待写字节上限，过载时丢弃并记录汇总，不让内存无界增长。
-- [ ] 应用退出等待日志写入使用有限超时，不因日志积压无限阻塞。
+- [x] Runtime 日志写入队列设置待写字节上限，过载时丢弃并记录汇总，不让内存无界增长。
+- [x] 应用退出等待日志写入使用有限超时，不因日志积压无限阻塞。
 - [ ] 长 Session、高频 Tool 输出和 stderr 洪泛压力测试不会导致持续内存增长或主线程长时间阻塞。
-- [ ] 日志待写队列上限为 1 MiB，单条最多 4 KiB，磁盘保留 3×5 MB；队列恢复后写入丢弃汇总。
+- [x] 日志待写队列上限为 1 MiB，单条最多 4 KiB，磁盘保留 3×5 MB；队列恢复后写入丢弃汇总。
 - [ ] 使用 fake Runtime 连续压力测试 30 分钟，产生至少 10,000 个流事件、1,000 次 Tool 更新和 100 MB stderr，不调用真实模型 API。
 - [ ] 应用整体退出不超过 10 秒，日志最多等待 2 秒，并确认没有遗留 OMP 进程组。
 
@@ -106,9 +106,9 @@
 
 - [ ] 空闲 CPU 小于 1%。
 - [ ] 主线程单次任务小于 50 ms。
-- [ ] 首屏 Renderer JS 小于 700 KB gzip。
+- [x] 首屏 Renderer JS 小于 700 KB gzip。
 - [ ] 空闲内存不超过空 Electron 基线加 80 MB。
-- [ ] 应用增量不超过空 Electron、OMP 二进制之外的 25 MB。
+- [x] 应用增量不超过空 Electron、OMP 二进制之外的 25 MB。
 - [ ] 超出预算时记录原因，不允许静默忽略。
 - [ ] Renderer JS、空闲 CPU、主线程长任务或持续内存增长超过阻断门槛时停止发布；其他例外必须由用户人工批准。
 - [ ] 空闲 CPU 在 Runtime ready 后静置 60 秒，再连续采样 60 秒并统计进程组平均值和峰值。
@@ -119,12 +119,12 @@
 - [x] CI 执行单元测试。
 - [x] GitHub Hosted Runner 覆盖 Ubuntu 22.04、24.04 的 x64、arm64。
 - [x] 每个平台和架构分别运行 Xvfb X11 与 Weston headless Wayland smoke，并保存截图和诊断日志；headless Wayland 使用软件渲染并在成功标记后受控终止，不替代真实 GPU 和优雅退出验收。
-- [ ] CI 执行 RPC smoke test，无法提供真实凭据时使用明确的测试模式。
-- [ ] CI 使用真实 OMP 执行不需要模型凭据的 `ready` 和 `get_state` smoke。
-- [ ] CI 构建 x64 AppImage 和 x64 `.deb`。
-- [ ] CI 检查打包产物中是否包含错误平台二进制或开发文件。
-- [ ] CI 记录构建产物大小。
-- [ ] CI 记录 Renderer 各 chunk 的原始大小和 gzip 大小。
+- [x] CI 执行 RPC smoke test，无法提供真实凭据时使用明确的测试模式。
+- [x] CI 使用真实 OMP 执行不需要模型凭据的 `ready` 和 `get_state` smoke。
+- [x] CI 构建 x64 AppImage 和 x64 `.deb`。
+- [x] CI 检查打包产物中是否包含错误平台二进制或开发文件。
+- [x] CI 记录构建产物大小。
+- [x] CI 记录 Renderer 各 chunk 的原始大小和 gzip 大小。
 
 ### 人工验收主链路
 
@@ -162,9 +162,11 @@
 - X11 结果：未填写
 - 真实 GPU 结果：未填写
 - 图形兼容模式结果：未填写
-- AppImage 大小：未填写
-- 首屏 Renderer JS gzip：未填写
+- AppImage 大小：211,309,029 bytes（本地构建，尚未完成 Ubuntu/FUSE 人工直跑验收）
+- `.deb` 大小：176,347,304 bytes；安装后 Installed-Size 约 455 MiB
+- 应用增量：`app.asar` 2,147,041 bytes（排除 Electron 和 bundled OMP）
+- 首屏 Renderer JS gzip：353,524 bytes
 - 空闲内存：未填写
 - OMP ready 时间：未填写
 - 首 token 延迟：未填写
-- 已知问题：未填写
+- 已知问题：当前开发机未安装 `libfuse.so.2`，AppImage 直跑尚未验收；解包目录不能代替安装后的 sandbox/AppArmor 环境。

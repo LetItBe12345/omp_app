@@ -1,0 +1,145 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: Stable SemVer without v, for example 0.1.0
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.release_version }}
+  cancel-in-progress: false
+
+jobs:
+  gpu-acceptance:
+    name: RTX 3090 Wayland acceptance
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 20
+    steps:
+      - name: Validate version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! '${{ inputs.release_version }}' =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo 'release_version 必须是稳定 SemVer X.Y.Z' >&2
+            exit 1
+          fi
+      - name: Checkout requested commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check native Wayland and RTX 3090
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${XDG_SESSION_TYPE:-}" = wayland
+          test -n "${WAYLAND_DISPLAY:-}"
+          nvidia-smi --query-gpu=name --format=csv,noheader | tee gpu-name.txt
+          rg -i 'RTX 3090' gpu-name.txt
+      - name: Install pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install, verify Runtime and build
+        run: pnpm install --frozen-lockfile && pnpm runtime:download && pnpm check && pnpm build
+      - name: Run hardware GPU smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tests/artifacts
+          OMP_SMOKE_SCREENSHOT="$PWD/tests/artifacts/gpu-smoke.png" \
+          OMP_GPU_ACCEPTANCE_OUTPUT="$PWD/tests/artifacts/gpu-info.json" \
+            pnpm smoke
+          if rg -n '"(gpu_compositing|webgl|webgl2)": "(disabled|unavailable|software)' tests/artifacts/gpu-info.json; then
+            echo 'Electron 没有使用预期的硬件加速' >&2
+            exit 1
+          fi
+      - name: Verify manual acceptance record
+        shell: bash
+        run: |
+          set -euo pipefail
+          state_root="${XDG_STATE_HOME:-${HOME}/.local/state}"
+          acceptance_file="$state_root/omp-desktop/release-acceptance/${GITHUB_SHA}.json"
+          node scripts/gpu-acceptance.mjs verify "$acceptance_file" \
+            --commit "$GITHUB_SHA" --version '${{ inputs.release_version }}'
+          cp "$acceptance_file" tests/artifacts/gpu-acceptance.json
+      - name: Upload GPU evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: gpu-acceptance-${{ github.sha }}
+          path: tests/artifacts/*
+          if-no-files-found: error
+          retention-days: 90
+
+  build-release:
+    name: Build draft release
+    needs: gpu-acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout accepted commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Build release packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm pkg set version='${{ inputs.release_version }}'
+          pnpm runtime:download
+          pnpm package:linux
+          pnpm package:check
+          deb="$(find dist -maxdepth 1 -name '*.deb' -print -quit)"
+          test "$(dpkg-deb -f "$deb" Version)" = '${{ inputs.release_version }}'
+          test "$(dpkg-deb -f "$deb" Architecture)" = amd64
+      - name: Write release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          appimage="$(basename "$(find dist -maxdepth 1 -name '*.AppImage' -print -quit)")"
+          deb="$(basename "$(find dist -maxdepth 1 -name '*.deb' -print -quit)")"
+          printf '%s\n' \
+            '# OMP Desktop v${{ inputs.release_version }}' \
+            '' \
+            '- 支持：Ubuntu 22.04、24.04 x64' \
+            '- Bundled OMP：v17.1.0' \
+            "- AppImage：$appimage" \
+            "- Debian：$deb" \
+            '- GPU 验收：RTX 3090、原生 Wayland，绑定 commit ${{ github.sha }}' \
+            '' \
+            '发布前请人工检查 SHA-256、已知问题和 GPU artifact。' > release-notes.md
+      - name: Create or update Draft Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag='v${{ inputs.release_version }}'
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "Tag $tag 已存在；为避免覆盖，停止发布" >&2
+            exit 1
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --draft --notes-file release-notes.md --target "$GITHUB_SHA"
+          else
+            gh release create "$tag" --draft --title "OMP Desktop $tag" --notes-file release-notes.md --target "$GITHUB_SHA"
+          fi
+          gh release upload "$tag" dist/*.AppImage dist/*.deb dist/*.sha256 dist/build-metrics.json --clobber

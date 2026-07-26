@@ -20,25 +20,55 @@ export function redactRuntimeLog(value: string, maxLength = 4_096): string {
 
 export class RuntimeDiagnostics {
   #writeQueue = Promise.resolve()
+  #pendingBytes = 0
+  #droppedLines = 0
+  #droppedBytes = 0
 
   constructor(
     readonly filePath: string,
     readonly maxBytes = 5 * 1024 * 1024,
-    readonly maxFiles = 3
+    readonly maxFiles = 3,
+    readonly maxPendingBytes = 1024 * 1024
   ) {}
 
   write(value: string): void {
-    const line = `${new Date().toISOString()} ${redactRuntimeLog(value)}\n`
+    let line = `${new Date().toISOString()} ${redactRuntimeLog(value)}\n`
+    let lineBytes = Buffer.byteLength(line)
+    if (this.#pendingBytes + lineBytes > this.maxPendingBytes) {
+      this.#droppedLines += 1
+      this.#droppedBytes += lineBytes
+      return
+    }
+    if (this.#droppedLines > 0) {
+      const summary = `${new Date().toISOString()} LOG_OVERLOAD: dropped=${this.#droppedLines} bytes=${this.#droppedBytes}\n`
+      const summaryBytes = Buffer.byteLength(summary)
+      if (
+        this.#pendingBytes + summaryBytes + lineBytes <=
+        this.maxPendingBytes
+      ) {
+        line = summary + line
+        lineBytes += summaryBytes
+        this.#droppedLines = 0
+        this.#droppedBytes = 0
+      }
+    }
+    this.#pendingBytes += lineBytes
     this.#writeQueue = this.#writeQueue
       .then(async () => {
         await this.#rotateIfNeeded(Buffer.byteLength(line))
         await appendFile(this.filePath, line, { encoding: 'utf8' })
       })
       .catch(() => undefined)
+      .finally(() => {
+        this.#pendingBytes -= lineBytes
+      })
   }
 
-  async flush(): Promise<void> {
-    await this.#writeQueue
+  async flush(timeoutMs = 2_000): Promise<void> {
+    await Promise.race([
+      this.#writeQueue,
+      new Promise<void>((resolve) => setTimeout(resolve, timeoutMs))
+    ])
   }
 
   async #rotateIfNeeded(incomingBytes: number): Promise<void> {
