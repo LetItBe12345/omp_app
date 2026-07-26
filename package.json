@@ -19,7 +19,7 @@
     "build": "electron-vite build",
     "runtime:download": "node scripts/download-runtime.mjs",
     "runtime:check": "node scripts/download-runtime.mjs --check",
-    "package:linux": "pnpm runtime:check && pnpm build && electron-builder --linux AppImage deb --x64",
+    "package:linux": "pnpm runtime:check && pnpm build && electron-builder --linux AppImage deb --x64 --publish never",
     "package:check": "node scripts/check-linux-package.mjs",
     "start": "electron-vite preview",
     "typecheck": "pnpm typecheck:node && pnpm typecheck:web",
