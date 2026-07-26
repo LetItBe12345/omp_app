@@ -53,15 +53,19 @@ jobs:
         run: pnpm install --frozen-lockfile && pnpm runtime:download && pnpm check && pnpm build
       - name: Run hardware GPU smoke
         shell: bash
-        env:
-          CHROME_DEVEL_SANDBOX: /usr/share/typora/chrome-sandbox
         run: |
           set -euo pipefail
+          system_sandbox=/usr/share/typora/chrome-sandbox
+          test "$(stat -c '%U:%G %a' "$system_sandbox")" = 'root:root 4755'
+          electron_binary="$(node -p "require('electron')")"
+          electron_sandbox="$(dirname "$electron_binary")/chrome-sandbox"
+          rm -f "$electron_sandbox"
+          ln -s "$system_sandbox" "$electron_sandbox"
           mkdir -p tests/artifacts
           OMP_SMOKE_SCREENSHOT="$PWD/tests/artifacts/gpu-smoke.png" \
           OMP_GPU_ACCEPTANCE_OUTPUT="$PWD/tests/artifacts/gpu-info.json" \
             pnpm smoke
-          if rg -n '"(gpu_compositing|webgl|webgl2)": "(disabled|unavailable|software)' tests/artifacts/gpu-info.json; then
+          if grep -En '"(gpu_compositing|webgl|webgl2)": "(disabled|unavailable|software)' tests/artifacts/gpu-info.json; then
             echo 'Electron 没有使用预期的硬件加速' >&2
             exit 1
           fi
