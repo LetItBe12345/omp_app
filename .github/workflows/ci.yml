@@ -48,7 +48,7 @@ jobs:
         run: pnpm runtime:download
 
       - name: Run real OMP RPC smoke without model API
-        run: node scripts/rpc-smoke.mjs
+        run: OMP_RPC_TEST_CONFIG=1 node scripts/rpc-smoke.mjs
 
       - name: Build application
         run: pnpm build
