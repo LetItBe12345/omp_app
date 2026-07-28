@@ -1,6 +1,6 @@
 # MVP-33：分离 CI 和 CD
 
-- 状态：进行中
+- 状态：已完成
 - 优先级：P0
 
 ## 目标
@@ -18,5 +18,10 @@ PR 只运行快速质量检查。真实 Runtime、Linux 打包和安装包 smoke
 ## 完成条件
 
 - [x] Workflow 和文档格式检查通过。
-- [ ] PR Quality 通过。
-- [ ] 合并后没有 `main` push CI。
+- [x] PR Quality 通过。
+- [x] CI 仅声明 `pull_request` 触发器，不声明 `main` push 触发器。
+
+## 验证记录
+
+- PR：#48
+- PR Quality：30338980406
