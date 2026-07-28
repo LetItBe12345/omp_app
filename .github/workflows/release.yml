@@ -40,11 +40,15 @@ jobs:
           cache-dependency-path: pnpm-lock.yaml
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Set candidate version and build once
+      - name: Set candidate version and prepare Runtime
         run: |
           pnpm pkg set version='${{ inputs.release_version }}'
           pnpm runtime:download
           pnpm runtime:check
+      - name: Run real RPC smoke
+        run: OMP_RPC_TEST_CONFIG=1 node scripts/rpc-smoke.mjs
+      - name: Build candidate once and check packages
+        run: |
           pnpm package:linux
           pnpm package:check
       - name: Check candidate metadata

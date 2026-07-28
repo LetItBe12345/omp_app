@@ -119,12 +119,12 @@
 - [x] CI 执行单元测试。
 - [x] GitHub Hosted Runner 覆盖 Ubuntu 22.04、24.04 的 x64、arm64。
 - [x] 每个平台和架构分别运行 Xvfb X11 与 Weston headless Wayland smoke，并保存截图和诊断日志；headless Wayland 使用软件渲染并在成功标记后受控终止，不替代真实 GPU 和优雅退出验收。
-- [x] CI 执行 RPC smoke test，无法提供真实凭据时使用明确的测试模式。
-- [x] CI 使用真实 OMP 执行不需要模型凭据的 `ready` 和 `get_state` smoke。
-- [x] CI 构建 x64 AppImage 和 x64 `.deb`。
-- [x] CI 检查打包产物中是否包含错误平台二进制或开发文件。
-- [x] CI 记录构建产物大小。
-- [x] CI 记录 Renderer 各 chunk 的原始大小和 gzip 大小。
+- [x] PR CI 执行 fake RPC smoke test。
+- [x] 手动 CD 使用真实 OMP 执行不需要模型凭据的 RPC smoke。
+- [x] 手动 CD 构建 x64 AppImage 和 x64 `.deb`。
+- [x] 手动 CD 检查打包产物中是否包含错误平台二进制或开发文件。
+- [x] 手动 CD 记录构建产物大小。
+- [x] PR CI 记录 Renderer 各 chunk 的原始大小和 gzip 大小。
 
 ### 人工验收主链路
 
@@ -148,7 +148,7 @@
 
 - [ ] Ubuntu AppImage 可以安装或直接运行。
 - [ ] 核心聊天、本地文件、Session、Runtime 环境和 Runtime 网络主链路通过。
-- [ ] CI 检查全部通过。
+- [ ] PR CI 和手动 CD 检查全部通过。
 - [ ] 性能指标已记录，超预算项有明确处理结论。
 - [ ] 安装包不包含 Browser Use、Computer Use 和无关平台资源。
 - [ ] 已知问题写入发布说明。
