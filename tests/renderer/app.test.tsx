@@ -211,8 +211,10 @@ describe('App shell', () => {
       })
     )
 
-    fireEvent.change(composer, { target: { value: '/compact' } })
-    fireEvent.keyDown(composer, { key: 'Enter' })
+    const nextComposer = screen.getByRole('textbox', { name: '任务输入' })
+    await waitFor(() => expect(nextComposer).toBeEnabled())
+    fireEvent.change(nextComposer, { target: { value: '/compact' } })
+    fireEvent.keyDown(nextComposer, { key: 'Enter' })
     expect(window.desktop.followUp).toHaveBeenCalledTimes(1)
     expect(
       await screen.findByText('任务结束后可执行 Slash Command')
@@ -351,8 +353,9 @@ describe('App shell', () => {
     const sendButton = screen.getByRole('button', { name: '发送' })
 
     fireEvent.click(sendButton)
-    await waitFor(() => expect(sendButton).toBeDisabled())
-    fireEvent.click(sendButton)
+    const pendingSendButton = screen.getByRole('button', { name: '发送' })
+    await waitFor(() => expect(pendingSendButton).toBeDisabled())
+    fireEvent.click(pendingSendButton)
     expect(window.desktop.prompt).toHaveBeenCalledTimes(1)
     finishPrompt?.({ ok: true, data: undefined })
   })
@@ -495,6 +498,53 @@ describe('App shell', () => {
         'yolo'
       )
     )
-    expect(await screen.findByText('第一条消息')).toBeInTheDocument()
+    expect(
+      await screen.findByText('第一条消息', {
+        selector: '[data-role="user"] *'
+      })
+    ).toBeInTheDocument()
+  })
+
+  it('新 Session 创建请求返回前立即显示用户首条消息', async () => {
+    vi.mocked(window.desktop.getWorkspaces).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        activeWorkspaceId: 'workspace-1',
+        workspaces: [
+          {
+            id: 'workspace-1',
+            path: '/tmp/workspace',
+            name: 'workspace',
+            available: true,
+            pinned: false,
+            addedAt: '2026-01-01T00:00:00.000Z',
+            lastUsedAt: '2026-01-01T00:00:00.000Z'
+          }
+        ],
+        hasMore: false
+      }
+    })
+    vi.mocked(window.desktop.getRuntimeState).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        status: 'ready',
+        workspacePath: '/tmp/workspace',
+        sessionId: 'old-session',
+        isStreaming: false,
+        queuedMessageCount: 0
+      }
+    })
+    vi.mocked(window.desktop.createSession).mockReturnValueOnce(
+      new Promise(() => undefined)
+    )
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '新建对话' }))
+    const composer = screen.getByRole('textbox', { name: '任务输入' })
+    fireEvent.change(composer, { target: { value: '面试会问什么' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送' }))
+
+    expect(await screen.findByText('面试会问什么')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '任务输入' })).toHaveValue('')
   })
 })

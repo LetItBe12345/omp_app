@@ -801,15 +801,26 @@ export function reduceOmpEvent(
 export function appendUserTurn(
   projection: ConversationProjection,
   text: string,
-  now = Date.now()
+  now = Date.now(),
+  id?: string
 ): ConversationProjection {
   const state = cloneProjection(projection)
   state.turns.push({
-    id: nextId(state, 'user'),
+    id: id ?? nextId(state, 'user'),
     role: 'user',
     text,
     createdAt: now
   })
+  return state
+}
+
+export function removeConversationTurn(
+  projection: ConversationProjection,
+  turnId: string
+): ConversationProjection {
+  const state = cloneProjection(projection)
+  state.turns = state.turns.filter((turn) => turn.id !== turnId)
+  if (state.activeTurnId === turnId) state.activeTurnId = undefined
   return state
 }
 

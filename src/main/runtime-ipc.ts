@@ -1919,9 +1919,7 @@ export function registerRuntimeIpc(
           await supervisor.restart(approvalMode)
           supervisor.setApprovalState(approvalMode, false)
         }
-        await supervisor.newSession()
-        await supervisor.prompt(input)
-        const snapshot = await supervisor.getState()
+        const snapshot = await supervisor.newSession()
         if (!snapshot.sessionId)
           throw new RuntimeFailure(
             'PROTOCOL_ERROR',
@@ -1949,8 +1947,11 @@ export function registerRuntimeIpc(
           workspace.id,
           snapshot.sessionId
         )
+        await supervisor.prompt(input)
         return success({
-          snapshot: approvalModeSaved ? snapshot : supervisor.snapshot,
+          snapshot: approvalModeSaved
+            ? supervisor.snapshot
+            : supervisor.setApprovalState(approvalMode, false, false),
           session: stateStore.applyPreferences(workspace.id, session)
         })
       } catch (error) {

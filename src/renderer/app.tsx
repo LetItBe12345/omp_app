@@ -37,6 +37,7 @@ import {
   createConversationProjection,
   projectHistory,
   reduceOmpEvent,
+  removeConversationTurn,
   type ConversationProjection
 } from './omp-event-reducer'
 import { strings } from './strings'
@@ -264,6 +265,7 @@ function Conversation({
     !runtime.isAuthenticating &&
     currentModelAvailable
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
+  const optimisticUserSequence = useRef(0)
   const composerComposingRef = useRef(false)
   const suppressComposerSelectionSyncRef = useRef(false)
   const [composerSelection, setComposerSelection] = useState<number | null>(
@@ -388,11 +390,20 @@ function Conversation({
     }
     setError(null)
     setSending(true)
+    const visibleUserText =
+      visibleText.trim() || (attachments.length ? '已发送图片' : message)
+    const optimisticUserId = `optimistic-user-${++optimisticUserSequence.current}`
     const promptInput = {
       message,
       references,
       ...(attachments.length ? { images: attachments } : {})
     }
+    setProjection((current) =>
+      appendUserTurn(current, visibleUserText, Date.now(), optimisticUserId)
+    )
+    onInput('')
+    onReferences([])
+    onAttachments([])
     const result =
       temporarySession && !busy
         ? await window.desktop.createSession(
@@ -404,15 +415,19 @@ function Conversation({
           ? await window.desktop.followUp(promptInput)
           : await window.desktop.prompt(promptInput)
     if (result.ok) {
-      setProjection((current) => appendUserTurn(current, visibleText))
-      onInput('')
       onSentReferences(references)
-      onReferences([])
-      onAttachments([])
       setSlashMenuDismissedFor(null)
       setSlashSelectionIndex(0)
       if (temporarySession && result.data) onSessionCreated(result.data)
-    } else setError(result.error.message)
+    } else {
+      setProjection((current) =>
+        removeConversationTurn(current, optimisticUserId)
+      )
+      onInput(value)
+      onReferences(references)
+      onAttachments(attachments)
+      setError(result.error.message)
+    }
     setSending(false)
   }
 
@@ -921,6 +936,7 @@ export function App(): React.JSX.Element {
     hasFreshSnapshot: false
   })
   const projectionSessionId = useRef<string | undefined>(undefined)
+  const skipHistoryRestoreKey = useRef<string | undefined>(undefined)
   const projectionRef = useRef(projection)
   const projectionCache = useRef(new Map<string, ConversationProjection>())
   const attachmentCache = useRef(
@@ -951,28 +967,31 @@ export function App(): React.JSX.Element {
     setComposerInput(value)
   }, [])
 
-  const applySnapshot = useCallback((snapshot: RuntimeSnapshot): void => {
-    const nextProjectionId = runtimeSessionKey(snapshot)
-    if (nextProjectionId !== projectionSessionId.current) {
-      projectionSessionId.current = nextProjectionId
-      setProjection(createConversationProjection())
-    }
-    setSlashCatalog((current) => {
-      if (current.sessionKey === nextProjectionId) return current
-      const cached = nextProjectionId
-        ? (slashCatalogCache.current.get(nextProjectionId) ?? [])
-        : []
-      return {
-        sessionKey: nextProjectionId,
-        commands: cached,
-        loading: false,
-        error: null,
-        stale: false,
-        hasFreshSnapshot: cached.length > 0
+  const applySnapshot = useCallback(
+    (snapshot: RuntimeSnapshot, preserveProjection = false): void => {
+      const nextProjectionId = runtimeSessionKey(snapshot)
+      if (nextProjectionId !== projectionSessionId.current) {
+        projectionSessionId.current = nextProjectionId
+        if (!preserveProjection) setProjection(createConversationProjection())
       }
-    })
-    setRuntime(snapshot)
-  }, [])
+      setSlashCatalog((current) => {
+        if (current.sessionKey === nextProjectionId) return current
+        const cached = nextProjectionId
+          ? (slashCatalogCache.current.get(nextProjectionId) ?? [])
+          : []
+        return {
+          sessionKey: nextProjectionId,
+          commands: cached,
+          loading: false,
+          error: null,
+          stale: false,
+          hasFreshSnapshot: cached.length > 0
+        }
+      })
+      setRuntime(snapshot)
+    },
+    []
+  )
 
   const refreshWorkspaces = useCallback(async (offset = 0): Promise<void> => {
     if (fixture) return
@@ -1295,6 +1314,11 @@ export function App(): React.JSX.Element {
       !currentProjectionKey
     )
       return
+    if (skipHistoryRestoreKey.current === currentProjectionKey) {
+      skipHistoryRestoreKey.current = undefined
+      projectionCache.current.set(currentProjectionKey, projectionRef.current)
+      return
+    }
     let cancelled = false
     const loadingTimer = window.setTimeout(() => {
       if (!projectionCache.current.has(currentProjectionKey))
@@ -1620,7 +1644,8 @@ export function App(): React.JSX.Element {
             onSessionCreated={({ snapshot, session }) => {
               setTemporarySession(false)
               setTemporaryApprovalMode('yolo')
-              applySnapshot(snapshot)
+              skipHistoryRestoreKey.current = runtimeSessionKey(snapshot)
+              applySnapshot(snapshot, true)
               sessionRequestId.current += 1
               setSessions((current) => [
                 session,

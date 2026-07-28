@@ -46,6 +46,68 @@ function Harness({
 }
 
 describe('ConversationThread', () => {
+  it('活动 Turn 完成并转入历史时不会按旧索引读取消息', async () => {
+    function CompletionHarness(): React.JSX.Element {
+      const [projection, setProjection] = useState(() =>
+        projectionFrom([
+          { type: 'agent_start' },
+          {
+            type: 'message_end',
+            message: {
+              id: 'working',
+              role: 'assistant',
+              stopReason: 'toolUse',
+              content: [
+                {
+                  type: 'toolCall',
+                  id: 'tool-1',
+                  name: 'read',
+                  arguments: { path: 'README.md' }
+                }
+              ]
+            }
+          }
+        ])
+      )
+      return (
+        <div style={{ height: 700 }}>
+          <button
+            onClick={() =>
+              setProjection((current) =>
+                reduceOmpEvent(current, {
+                  type: 'message_end',
+                  message: {
+                    id: 'final',
+                    role: 'assistant',
+                    stopReason: 'stop',
+                    content: [{ type: 'text', text: '最终回答' }]
+                  }
+                })
+              )
+            }
+            type="button"
+          >
+            完成
+          </button>
+          <ConversationRuntime
+            isRunning
+            onCancel={async () => undefined}
+            onSend={async () => undefined}
+            projection={projection}
+            setProjection={setProjection}
+          >
+            <ThreadMessages />
+          </ConversationRuntime>
+        </div>
+      )
+    }
+
+    render(<CompletionHarness />)
+    fireEvent.click(screen.getByRole('button', { name: '完成' }))
+
+    expect(await screen.findByText('最终回答')).toBeInTheDocument()
+  })
+
   it('工具审批使用中文单项和批量操作，默认焦点在允许', async () => {
     const deadline = Date.now() + 30_000
     const initial = projectionFrom([{ type: 'agent_start' }])
