@@ -1346,10 +1346,11 @@ export function ConversationRuntime({
     onNew: async (message) => onSend(findText(message)),
     onCancel
   })
+  const messageKey = messages.map((message) => message.id).join('\n')
   return (
     <ConversationContext.Provider value={{ projection, setProjection }}>
       <SettledTurnsContext.Provider value={settledContext}>
-        <AssistantRuntimeProvider runtime={runtime}>
+        <AssistantRuntimeProvider key={messageKey} runtime={runtime}>
           {children}
         </AssistantRuntimeProvider>
       </SettledTurnsContext.Provider>

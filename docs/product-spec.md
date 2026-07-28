@@ -224,7 +224,7 @@ OMP Desktop 不为 Electron 自身建立一套泛化代理。MVP 的网络设置
 Runtime Network Profile 提供三种模式：
 
 1. 不使用代理。
-2. 使用系统代理。
+2. 自动代理。
 3. 手动代理。
 
 手动代理配置包括：
@@ -238,7 +238,7 @@ Runtime Network Profile 提供三种模式：
 三种模式的解析规则：
 
 - 不使用代理：从最终环境中显式移除大小写代理变量。
-- 使用系统代理：保留 Desktop 启动环境中已有的大小写代理变量；未发现时明确报错，不静默直连。
+- 自动代理：先读取 Login Shell 和交互 Shell 的 HTTP 代理变量；未发现时读取 v2rayN `guiNConfig.json` 中的入站端口，仅在本地端口能返回 HTTP 代理响应时使用。不扫描其他端口；未发现时保持直连并在界面显示未注入代理。
 - 手动代理：用用户输入的值覆盖继承的代理变量。
 
 ### 9.1 OMP Runtime 与 RPC Bash

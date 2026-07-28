@@ -1,8 +1,14 @@
 // @vitest-environment node
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  checkLocalHttpProxy,
   checkLocalProxyPort,
+  discoverV2rayNProxy,
+  extractV2rayNPorts,
   RuntimeEnvironmentResolver
 } from '../../src/main/runtime-environment'
 
@@ -83,6 +89,79 @@ describe('RuntimeEnvironmentResolver', () => {
     expect(socks.error).toContain('本地 HTTP 入站')
   })
 
+  it('自动模式在 Login Shell 没有代理时读取交互 Shell 配置', async () => {
+    const calls: string[][] = []
+    const resolver = new RuntimeEnvironmentResolver(
+      process.execPath,
+      { SHELL: '/bin/bash', PATH: '/usr/bin:/bin' },
+      5_000,
+      async (_shell, args, env) => {
+        calls.push(args)
+        const values =
+          args[0] === '-ic'
+            ? { ...env, https_proxy: 'http://127.0.0.1:10808' }
+            : env
+        return `${Object.entries(values)
+          .map(([key, value]) => `${key}=${value}`)
+          .join('\0')}\0`
+      }
+    )
+
+    const resolved = await resolver.resolve({ mode: 'auto' })
+
+    expect(calls).toEqual([
+      ['-ilc', 'env -0'],
+      ['-ic', 'env -0']
+    ])
+    expect(resolved.network.result).toBe('http-proxy')
+    expect(resolved.env).toMatchObject({
+      PI_PROXY: 'http://127.0.0.1:10808',
+      HTTPS_PROXY: 'http://127.0.0.1:10808',
+      https_proxy: 'http://127.0.0.1:10808'
+    })
+  })
+
+  it('自动模式在 Shell 没有代理时读取可达的 v2rayN 入站', async () => {
+    const resolver = new RuntimeEnvironmentResolver(
+      process.execPath,
+      { SHELL: '/bin/bash', PATH: '/usr/bin:/bin' },
+      5_000,
+      async (_shell, _args, env) =>
+        `${Object.entries(env)
+          .map(([key, value]) => `${key}=${value}`)
+          .join('\0')}\0`,
+      async () => ({
+        url: 'http://127.0.0.1:10808',
+        source: 'v2rayN (http://127.0.0.1:10808)'
+      })
+    )
+
+    const resolved = await resolver.resolve({ mode: 'auto' })
+
+    expect(resolved.network).toMatchObject({
+      result: 'http-proxy',
+      proxySource: 'v2rayN (http://127.0.0.1:10808)'
+    })
+    expect(resolved.env).toMatchObject({
+      PI_PROXY: 'http://127.0.0.1:10808',
+      HTTPS_PROXY: 'http://127.0.0.1:10808',
+      https_proxy: 'http://127.0.0.1:10808'
+    })
+  })
+
+  it('只提取 v2rayN 配置中合法且去重的本地端口', () => {
+    expect(
+      extractV2rayNPorts({
+        Inbound: [
+          { LocalPort: 10808 },
+          { LocalPort: 10808 },
+          { LocalPort: 0 },
+          { LocalPort: '7890' }
+        ]
+      })
+    ).toEqual([10808])
+  })
+
   it('诊断复制结果不包含代理凭据或普通环境变量', async () => {
     const resolver = new RuntimeEnvironmentResolver(process.execPath, {
       SHELL: '/missing-shell',
@@ -112,5 +191,41 @@ describe('RuntimeEnvironmentResolver', () => {
     )
     await expect(checkLocalProxyPort(address.port, 50)).resolves.toBe(false)
     await expect(checkLocalProxyPort(0)).resolves.toBe(false)
+  })
+
+  it('只把返回 HTTP 响应的本地端口当作 HTTP 代理', async () => {
+    const httpProxy = createServer((socket) => {
+      socket.once('data', () =>
+        socket.end(
+          'HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n'
+        )
+      )
+    })
+    await new Promise<void>((resolve) =>
+      httpProxy.listen(0, '127.0.0.1', resolve)
+    )
+    const address = httpProxy.address()
+    if (!address || typeof address === 'string') throw new Error('监听失败')
+
+    const dataHome = await mkdtemp(join(tmpdir(), 'omp-v2rayn-test-'))
+    const configDirectory = join(dataHome, 'v2rayN', 'guiConfigs')
+    try {
+      await mkdir(configDirectory, { recursive: true })
+      await writeFile(
+        join(configDirectory, 'guiNConfig.json'),
+        JSON.stringify({ Inbound: [{ LocalPort: address.port }] })
+      )
+
+      await expect(checkLocalHttpProxy(address.port, 200)).resolves.toBe(true)
+      await expect(discoverV2rayNProxy(dataHome)).resolves.toEqual({
+        url: `http://127.0.0.1:${address.port}`,
+        source: `v2rayN (http://127.0.0.1:${address.port})`
+      })
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        httpProxy.close((error) => (error ? reject(error) : resolve()))
+      )
+      await rm(dataHome, { recursive: true, force: true })
+    }
   })
 })

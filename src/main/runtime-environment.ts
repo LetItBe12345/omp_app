@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process'
-import { access } from 'node:fs/promises'
+import { access, readFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { createConnection } from 'node:net'
+import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { promisify } from 'node:util'
 import type {
@@ -36,6 +37,51 @@ export type ResolvedRuntimeEnvironment = {
   env: NodeJS.ProcessEnv
   network: RuntimeNetworkStatus
   sourceError?: string
+}
+
+type ReadShellEnvironment = (
+  shell: string,
+  args: string[],
+  env: NodeJS.ProcessEnv
+) => Promise<string>
+
+type DiscoveredLocalProxy = { url: string; source: string }
+type DiscoverLocalProxy = () => Promise<DiscoveredLocalProxy | undefined>
+
+export function extractV2rayNPorts(value: unknown): number[] {
+  if (!value || typeof value !== 'object') return []
+  const inbounds = (value as Record<string, unknown>)['Inbound']
+  if (!Array.isArray(inbounds)) return []
+  return [
+    ...new Set(
+      inbounds.flatMap((item) => {
+        if (!item || typeof item !== 'object') return []
+        const port = (item as Record<string, unknown>)['LocalPort']
+        return typeof port === 'number' &&
+          Number.isInteger(port) &&
+          port >= 1 &&
+          port <= 65_535
+          ? [port]
+          : []
+      })
+    )
+  ]
+}
+
+export async function discoverV2rayNProxy(
+  dataHome = process.env['XDG_DATA_HOME'] || join(homedir(), '.local', 'share')
+): Promise<DiscoveredLocalProxy | undefined> {
+  const configPath = join(dataHome, 'v2rayN', 'guiConfigs', 'guiNConfig.json')
+  const config = await readFile(configPath, 'utf8')
+    .then((text) => JSON.parse(text) as unknown)
+    .catch(() => undefined)
+  for (const port of extractV2rayNPorts(config)) {
+    if (await checkLocalHttpProxy(port, 700)) {
+      const url = `http://127.0.0.1:${port}`
+      return { url, source: `v2rayN (${url})` }
+    }
+  }
+  return undefined
 }
 
 function removeProxyVariables(env: NodeJS.ProcessEnv): void {
@@ -86,7 +132,22 @@ export class RuntimeEnvironmentResolver {
   constructor(
     readonly runtimePath: string,
     private readonly electronEnv: NodeJS.ProcessEnv = process.env,
-    private readonly timeoutMs = 5_000
+    timeoutMs = 5_000,
+    private readonly readShellEnvironment: ReadShellEnvironment = async (
+      shell,
+      args,
+      env
+    ) =>
+      (
+        await execFileAsync(shell, args, {
+          encoding: 'utf8',
+          env,
+          maxBuffer: 4 * 1024 * 1024,
+          timeout: timeoutMs
+        })
+      ).stdout,
+    private readonly discoverLocalProxy: DiscoverLocalProxy = () =>
+      discoverV2rayNProxy(electronEnv['XDG_DATA_HOME'])
   ) {}
 
   async resolve(
@@ -96,14 +157,15 @@ export class RuntimeEnvironmentResolver {
     let base: NodeJS.ProcessEnv
     let source: RuntimeNetworkStatus['source'] = 'login-shell'
     let sourceError: string | undefined
+    let discoveredProxySource: string | undefined
     try {
-      const { stdout } = await execFileAsync(shell, ['-ilc', 'env -0'], {
-        encoding: 'utf8',
-        env: this.electronEnv,
-        maxBuffer: 4 * 1024 * 1024,
-        timeout: this.timeoutMs
-      })
-      base = parseShellEnvironment(stdout)
+      base = parseShellEnvironment(
+        await this.readShellEnvironment(
+          shell,
+          ['-ilc', 'env -0'],
+          this.electronEnv
+        )
+      )
     } catch (error) {
       base = { ...this.electronEnv }
       source = 'electron-fallback'
@@ -113,8 +175,42 @@ export class RuntimeEnvironmentResolver {
           : 'Login Shell 探测失败'
     }
 
+    if (
+      config.mode === 'auto' &&
+      this.detectProxy(base, config, source).result !== 'http-proxy'
+    ) {
+      try {
+        const interactive = parseShellEnvironment(
+          await this.readShellEnvironment(
+            shell,
+            ['-ic', 'env -0'],
+            this.electronEnv
+          )
+        )
+        for (const key of PROXY_KEYS) {
+          if (interactive[key]) base[key] = interactive[key]
+        }
+      } catch {
+        // Login Shell 仍可用时，交互 Shell 探测失败不影响其他环境。
+      }
+    }
+
+    if (
+      config.mode === 'auto' &&
+      this.detectProxy(base, config, source).result !== 'http-proxy'
+    ) {
+      const discovered = await this.discoverLocalProxy().catch(() => undefined)
+      if (discovered) {
+        base['HTTPS_PROXY'] = discovered.url
+        discoveredProxySource = discovered.source
+      }
+    }
+
     const env = { ...base }
-    const detected = this.detectProxy(base, config, source)
+    const environmentDetection = this.detectProxy(base, config, source)
+    const detected = discoveredProxySource
+      ? { ...environmentDetection, proxySource: discoveredProxySource }
+      : environmentDetection
     removeProxyVariables(env)
     if (config.mode === 'manual') {
       if (!config.manualPort) throw new Error('请输入 1–65535 的本地代理端口')
@@ -300,6 +396,39 @@ export function checkLocalProxyPort(
     }
     socket.setTimeout(timeoutMs, () => finish(false))
     socket.once('connect', () => finish(true))
+    socket.once('error', () => finish(false))
+  })
+}
+
+export function checkLocalHttpProxy(
+  port: number,
+  timeoutMs = 1_500
+): Promise<boolean> {
+  if (!Number.isInteger(port) || port < 1 || port > 65_535)
+    return Promise.resolve(false)
+  return new Promise((resolve) => {
+    const socket = createConnection({ host: '127.0.0.1', port })
+    let settled = false
+    let response = ''
+    const finish = (result: boolean): void => {
+      if (settled) return
+      settled = true
+      socket.destroy()
+      resolve(result)
+    }
+    socket.setTimeout(timeoutMs, () => finish(false))
+    socket.once('connect', () => {
+      socket.write(
+        'GET http://127.0.0.1:1/ HTTP/1.1\r\nHost: 127.0.0.1:1\r\nConnection: close\r\n\r\n'
+      )
+    })
+    socket.on('data', (chunk) => {
+      response += String(chunk)
+      if (response.includes('\r\n'))
+        finish(/^HTTP\/1\.[01] \d{3}/u.test(response))
+      else if (response.length > 256) finish(false)
+    })
+    socket.once('end', () => finish(false))
     socket.once('error', () => finish(false))
   })
 }
