@@ -1,6 +1,6 @@
 # MVP-32：Runtime 生命周期回归测试
 
-- 状态：进行中
+- 状态：已完成
 - 优先级：P0
 - 前置任务：MVP-02、MVP-10
 
@@ -21,5 +21,12 @@
 
 - [x] `pnpm test` 通过。
 - [x] 本地类型检查、Lint 和格式检查通过。
-- [ ] PR Quality 通过。
-- [ ] `main` 的 Linux 安装包与 X11/Wayland smoke 通过。
+- [x] PR Quality 通过。
+- [x] `main` 的 Linux 安装包与 X11/Wayland smoke 通过。
+
+## 验证记录
+
+- PR：#46
+- `main` CI：30337614795
+- Ubuntu 22.04 x64 X11 安装包 smoke：通过。
+- Ubuntu 24.04 x64 Wayland 安装包 smoke：通过。
