@@ -68,6 +68,7 @@ function renderSidebar(onRenameSession = vi.fn()): void {
       onSearch={vi.fn()}
       onSwitchSession={vi.fn()}
       openingWorkspace={false}
+      switchingWorkspace={false}
       overview={overview}
       runtime={runtime}
       search=""

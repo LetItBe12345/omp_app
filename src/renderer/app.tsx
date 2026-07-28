@@ -928,6 +928,7 @@ export function App(): React.JSX.Element {
   const [draftStatus, setDraftStatus] = useState<string | null>(null)
   const [openingSession, setOpeningSession] = useState(false)
   const [openingWorkspace, setOpeningWorkspace] = useState(false)
+  const [switchingWorkspace, setSwitchingWorkspace] = useState(false)
   const [slashCatalog, setSlashCatalog] = useState<SlashCatalogState>({
     commands: [],
     loading: false,
@@ -946,6 +947,7 @@ export function App(): React.JSX.Element {
   const slashRequest = useRef<Promise<void> | null>(null)
   const slashRequestKey = useRef<string | undefined>(undefined)
   const sessionRequestId = useRef(0)
+  const workspaceRequestPending = useRef(false)
   const runtimeReadyRef = useRef(false)
   const activeWorkspaceId = overview.activeWorkspaceId
   const activeWorkspaceIdRef = useRef(activeWorkspaceId)
@@ -1030,6 +1032,15 @@ export function App(): React.JSX.Element {
     },
     []
   )
+
+  const resetSessionsForWorkspaceChange = useCallback((): void => {
+    sessionRequestId.current += 1
+    setSessions([])
+    setSessionNextOffset(0)
+    setHasMoreSessions(false)
+    setOpeningSession(false)
+    setSessionError(null)
+  }, [])
 
   const refreshModels = useCallback(async (): Promise<boolean> => {
     const result = await window.desktop.getAvailableModels()
@@ -1345,12 +1356,14 @@ export function App(): React.JSX.Element {
   }, [currentProjectionKey, runtime.sessionId, runtime.status])
 
   const openWorkspace = async (): Promise<void> => {
-    if (openingWorkspace) return
+    if (workspaceRequestPending.current) return
+    workspaceRequestPending.current = true
     setOpeningWorkspace(true)
     try {
       const result = await window.desktop.chooseWorkspace()
       if (result.ok && result.data) {
         const { workspace, snapshot } = result.data
+        resetSessionsForWorkspaceChange()
         setTemporarySession(false)
         setTemporaryApprovalMode('yolo')
         setComposerInput('')
@@ -1368,26 +1381,38 @@ export function App(): React.JSX.Element {
         void refreshWorkspaces()
       } else if (!result.ok) setSessionError(result.error.message)
     } finally {
+      workspaceRequestPending.current = false
       setOpeningWorkspace(false)
     }
   }
 
   const activateWorkspace = async (workspaceId: string): Promise<void> => {
-    if (workspaceId === activeWorkspaceId) return
-    const result = await window.desktop.activateWorkspace(workspaceId)
-    if (!result.ok) {
-      setSessionError(result.error.message)
+    if (workspaceId === activeWorkspaceId || workspaceRequestPending.current)
       return
+    workspaceRequestPending.current = true
+    setSwitchingWorkspace(true)
+    resetSessionsForWorkspaceChange()
+    try {
+      const result = await window.desktop.activateWorkspace(workspaceId)
+      if (!result.ok) {
+        setSessionError(result.error.message)
+        if (activeWorkspaceId)
+          void refreshSessions(activeWorkspaceId, 0, sessionSearch)
+        return
+      }
+      setTemporarySession(false)
+      setTemporaryApprovalMode('yolo')
+      setComposerInput('')
+      setReferences([])
+      setRecentReferences([])
+      setAttachments([])
+      applySnapshot(result.data)
+      setOverview((current) => ({ ...current, activeWorkspaceId: workspaceId }))
+      void refreshWorkspaces()
+    } finally {
+      workspaceRequestPending.current = false
+      setSwitchingWorkspace(false)
     }
-    setTemporarySession(false)
-    setTemporaryApprovalMode('yolo')
-    setComposerInput('')
-    setReferences([])
-    setRecentReferences([])
-    setAttachments([])
-    applySnapshot(result.data)
-    setOverview((current) => ({ ...current, activeWorkspaceId: workspaceId }))
-    void refreshWorkspaces()
   }
 
   const switchSession = async (sessionId: string): Promise<void> => {
@@ -1419,6 +1444,7 @@ export function App(): React.JSX.Element {
     setRecentReferences([])
     setAttachments(attachmentCache.current.get(targetCacheKey) ?? [])
     applySnapshot(result.data)
+    setSessionError(null)
     if (cached) setProjection(cached)
   }
 
@@ -1570,6 +1596,7 @@ export function App(): React.JSX.Element {
             overview={overview}
             onOpenWorkspace={() => void openWorkspace()}
             openingWorkspace={openingWorkspace}
+            switchingWorkspace={switchingWorkspace}
             onPinSession={(id, pinned) => {
               if (!activeWorkspaceId) return
               void updateSession(

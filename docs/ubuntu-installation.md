@@ -5,8 +5,8 @@
 ## `.deb`
 
 ```sh
-sha256sum -c omp-desktop-0.1.1-linux-x64.deb.sha256
-sudo apt install ./omp-desktop-0.1.1-linux-x64.deb
+sha256sum -c omp-desktop-0.1.2-linux-x64.deb.sha256
+sudo apt install ./omp-desktop-0.1.2-linux-x64.deb
 omp-desktop --version
 ```
 
@@ -15,9 +15,9 @@ omp-desktop --version
 ## AppImage
 
 ```sh
-sha256sum -c omp-desktop-0.1.1-linux-x64.AppImage.sha256
-chmod +x omp-desktop-0.1.1-linux-x64.AppImage
-./omp-desktop-0.1.1-linux-x64.AppImage
+sha256sum -c omp-desktop-0.1.2-linux-x64.AppImage.sha256
+chmod +x omp-desktop-0.1.2-linux-x64.AppImage
+./omp-desktop-0.1.2-linux-x64.AppImage
 ```
 
 AppImage 无需安装。若系统的 Chromium sandbox 策略阻止启动，改用 `.deb`，不要用 `--no-sandbox` 作为常规解决方案。

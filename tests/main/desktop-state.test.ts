@@ -119,6 +119,38 @@ describe('DesktopStateStore', () => {
     ).toBeUndefined()
   })
 
+  it('只清除仍然匹配的活动 Session，并保留 Session 偏好', async () => {
+    const root = join(
+      tmpdir(),
+      `omp-state-session-${process.pid}-${Date.now()}`
+    )
+    const workspacePath = join(root, 'workspace')
+    await mkdir(workspacePath, { recursive: true })
+    const store = new DesktopStateStore(join(root, 'desktop-state.json'))
+    await store.load()
+    const workspace = await store.addWorkspace(workspacePath)
+    await store.updateSessionPreference(workspace.id, 'stale-session', {
+      pinned: true,
+      approvalMode: 'write'
+    })
+    await store.setActiveSession(workspace.id, 'stale-session')
+
+    expect(
+      await store.clearActiveSessionIfMatches(workspace.id, 'other-session')
+    ).toBe(false)
+    expect(store.requireWorkspace(workspace.id).activeSessionId).toBe(
+      'stale-session'
+    )
+    expect(
+      await store.clearActiveSessionIfMatches(workspace.id, 'stale-session')
+    ).toBe(true)
+    expect(store.requireWorkspace(workspace.id).activeSessionId).toBeUndefined()
+    expect(store.sessionPreference(workspace.id, 'stale-session')).toEqual({
+      pinned: true,
+      approvalMode: 'write'
+    })
+  })
+
   it('Workspace 按创建时间稳定排序，激活后不交换位置', async () => {
     const root = join(tmpdir(), `omp-state-order-${process.pid}-${Date.now()}`)
     const statePath = join(root, 'desktop-state.json')

@@ -1,7 +1,7 @@
 {
   "name": "omp-desktop",
   "productName": "OMP Desktop",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "description": "OMP 的轻量本地 Agent Desktop",
@@ -29,6 +29,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
+    "test:workspace-session": "vitest run tests/main/desktop-state.test.ts tests/main/runtime-ipc.test.ts tests/renderer/app.test.tsx",
     "test:watch": "vitest",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test",
     "smoke": "node scripts/electron-smoke.mjs"

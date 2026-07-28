@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_version:
-        description: Stable SemVer without v, for example 0.1.1
+        description: Stable SemVer without v, for example 0.1.2
         required: true
         type: string
 

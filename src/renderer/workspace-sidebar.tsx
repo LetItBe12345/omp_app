@@ -62,7 +62,8 @@ export function WorkspaceSidebar({
   onLoadMoreSessions,
   hasMoreSessions,
   onLoadMoreWorkspaces,
-  openingWorkspace
+  openingWorkspace,
+  switchingWorkspace
 }: {
   runtime: RuntimeSnapshot
   overview: WorkspaceOverview
@@ -85,6 +86,7 @@ export function WorkspaceSidebar({
   hasMoreSessions: boolean
   onLoadMoreWorkspaces: () => void
   openingWorkspace: boolean
+  switchingWorkspace: boolean
 }): React.JSX.Element {
   const [menu, setMenu] = useState<MenuTarget | null>(null)
   const [renaming, setRenaming] = useState<{
@@ -173,6 +175,8 @@ export function WorkspaceSidebar({
                       : ''
                   }`}
                   disabled={
+                    openingWorkspace ||
+                    switchingWorkspace ||
                     runtime.status === 'starting' ||
                     runtime.status === 'stopping'
                   }
@@ -301,7 +305,9 @@ export function WorkspaceSidebar({
                               }`}
                               disabled={
                                 session.compatibility === 'corrupt' ||
-                                session.compatibility === 'future'
+                                session.compatibility === 'future' ||
+                                runtime.status !== 'ready' ||
+                                runtime.approvalModeChanging === true
                               }
                               onClick={() => onSwitchSession(session.id)}
                               onContextMenu={(event) =>
