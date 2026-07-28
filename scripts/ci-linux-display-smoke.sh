@@ -13,14 +13,14 @@ case "$display_server" in
 esac
 
 artifact_dir="${RUNNER_TEMP:-/tmp}/omp-ci"
-screenshot_path="$PWD/tests/artifacts/${display_server}-smoke.png"
+screenshot_path="${OMP_SMOKE_SCREENSHOT_PATH:-$PWD/tests/artifacts/${display_server}-smoke.png}"
 weston_pid=""
 smoke_home="$artifact_dir/home"
 smoke_config="$smoke_home/.config"
 smoke_data="$smoke_home/.local/share"
 smoke_cache="$smoke_home/.cache"
 
-mkdir -p "$artifact_dir" tests/artifacts "$smoke_home" "$smoke_config" "$smoke_data" "$smoke_cache"
+mkdir -p "$artifact_dir" "$(dirname "$screenshot_path")" "$smoke_home" "$smoke_config" "$smoke_data" "$smoke_cache"
 export HOME="$smoke_home"
 export XDG_CONFIG_HOME="$smoke_config"
 export XDG_DATA_HOME="$smoke_data"
@@ -42,6 +42,7 @@ cleanup() {
   {
     pgrep -a -x omp-desktop || true
     pgrep -a -f '/electron/dist/electron' || true
+    pgrep -a -f '[r]untime/omp --mode rpc' || true
   } | sort -u >"$artifact_dir/electron-processes-after.txt"
   exit "$exit_code"
 }
@@ -66,6 +67,60 @@ export OMP_SMOKE_SCREENSHOT="$screenshot_path"
 export GTK_IM_MODULE=ibus
 export XMODIFIERS=@im=ibus
 
+smoke_runs=1
+if [[ -n "$smoke_executable" ]]; then
+  workspace_dir="$smoke_home/workspace"
+  omp_profile="$artifact_dir/omp-profile"
+  mkdir -p "$workspace_dir" "$omp_profile" "$XDG_CONFIG_HOME/OMP Desktop"
+  WORKSPACE_DIR="$workspace_dir" OMP_PROFILE="$omp_profile" node --input-type=commonjs - <<'NODE'
+  const fs = require('node:fs')
+  const path = require('node:path')
+  fs.writeFileSync(
+    path.join(process.env.OMP_PROFILE, 'models.yml'),
+    [
+      'providers:',
+      '  ci-local:',
+      '    baseUrl: http://127.0.0.1:9/v1',
+      '    api: openai-completions',
+      '    auth: none',
+      '    models:',
+      '      - id: ci-smoke',
+      '        name: CI Smoke',
+      '        contextWindow: 4096',
+      '        maxTokens: 256',
+      ''
+    ].join('\n')
+  )
+  const statePath = path.join(
+    process.env.XDG_CONFIG_HOME,
+    'OMP Desktop',
+    'desktop-state.json'
+  )
+  fs.writeFileSync(
+    statePath,
+    JSON.stringify({
+      version: 1,
+      activeWorkspaceId: 'ci-workspace',
+      workspaces: [
+        {
+          id: 'ci-workspace',
+          path: process.env.WORKSPACE_DIR,
+          addedAt: new Date(0).toISOString(),
+          lastUsedAt: new Date(0).toISOString(),
+          pinned: false
+        }
+      ],
+      sessionPreferences: {},
+      ui: { runtimeNetwork: { mode: 'off' } }
+    }) + '\n'
+  )
+NODE
+  export PI_CODING_AGENT_DIR="$omp_profile"
+  export PI_NO_PTY=1
+  export OMP_SMOKE_RUNTIME=true
+  smoke_runs=2
+fi
+
 if [[ "$display_server" == "x11" ]]; then
   export XDG_SESSION_TYPE=x11
   smoke_command=(node scripts/electron-smoke.mjs)
@@ -74,7 +129,10 @@ if [[ "$display_server" == "x11" ]]; then
   else
     smoke_command=(pnpm smoke)
   fi
-  xvfb-run -a --server-args='-screen 0 1440x900x24 -nolisten tcp' "${smoke_command[@]}"
+  for attempt in $(seq 1 "$smoke_runs"); do
+    echo "运行 X11 smoke：attempt=$attempt/$smoke_runs"
+    xvfb-run -a --server-args='-screen 0 1440x900x24 -nolisten tcp' "${smoke_command[@]}"
+  done
 else
   unset DISPLAY
   export XDG_SESSION_TYPE=wayland
@@ -110,7 +168,10 @@ else
 
   if [[ -n "$smoke_executable" ]]; then
     export OMP_SMOKE_EXECUTABLE="$smoke_executable"
-    node scripts/electron-smoke.mjs
+    for attempt in $(seq 1 "$smoke_runs"); do
+      echo "运行 Wayland smoke：attempt=$attempt/$smoke_runs"
+      node scripts/electron-smoke.mjs
+    done
   else
     pnpm smoke
   fi
@@ -132,9 +193,10 @@ fi
 app_processes="$({
   pgrep -a -x omp-desktop || true
   pgrep -a -f '/electron/dist/electron' || true
+  pgrep -a -f '[r]untime/omp --mode rpc' || true
 } | sort -u)"
 if [[ -n "$app_processes" ]]; then
-  echo 'Smoke 结束后仍有 Electron 进程残留' >&2
+  echo 'Smoke 结束后仍有 Electron 或 OMP 进程残留' >&2
   printf '%s\n' "$app_processes" >&2
   exit 1
 fi

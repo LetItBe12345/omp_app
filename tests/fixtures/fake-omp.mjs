@@ -1,6 +1,6 @@
 import { createInterface } from 'node:readline'
 import { spawn } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
+import { appendFileSync, writeFileSync } from 'node:fs'
 
 if (process.env.FAKE_GRANDCHILD_PID_FILE) {
   const grandchild = spawn(
@@ -32,6 +32,9 @@ if (process.env.FAKE_NO_MODELS === '1') {
 const lines = createInterface({ input: process.stdin })
 lines.on('line', (line) => {
   const command = JSON.parse(line)
+  if (process.env.FAKE_COMMAND_LOG) {
+    appendFileSync(process.env.FAKE_COMMAND_LOG, `${command.type}\n`)
+  }
   const response = (data) =>
     send({
       type: 'response',
