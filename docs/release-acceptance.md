@@ -32,7 +32,7 @@ OMP_DESKTOP_SETUP_PROFILE="release-test-$(date +%s)" omp-desktop --setup-provide
 
 ```sh
 node scripts/gpu-acceptance.mjs sign \
-  --commit "$(git rev-parse HEAD)" --version 0.1.0
+  --commit "$(git rev-parse HEAD)" --version 0.1.1
 ```
 
 脚本只有在全部项目输入 `y` 后才生成 `~/.local/state/omp-desktop/release-acceptance/<commit>.json`。该文件包含操作者、时间、Wayland、RTX 3090、版本和 commit，不包含 Token。失败项必须修复后重新签收，不能编辑 JSON 冒充通过。
