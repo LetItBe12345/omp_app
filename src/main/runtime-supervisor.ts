@@ -237,6 +237,10 @@ export class RuntimeSupervisor extends EventEmitter {
   #pending = new Map<string, PendingRequest>()
   #decoder = new JsonlDecoder()
   #startPromise: Promise<RuntimeSnapshot> | null = null
+  #startingWorkspacePath: string | null = null
+  #startingApprovalMode: ApprovalMode | null = null
+  #restartPromise: Promise<RuntimeSnapshot> | null = null
+  #publishSnapshots = true
   #intentionalStop = false
   #lastCrashAt = 0
   #workspaceEnv: NodeJS.ProcessEnv = {}
@@ -311,10 +315,23 @@ export class RuntimeSupervisor extends EventEmitter {
     env: NodeJS.ProcessEnv = process.env,
     approvalMode: ApprovalMode = this.#snapshot.approvalMode ?? 'yolo'
   ): Promise<RuntimeSnapshot> {
-    if (this.#startPromise) return this.#startPromise
+    if (this.#startPromise) {
+      if (
+        this.#startingWorkspacePath === workspacePath &&
+        this.#startingApprovalMode === approvalMode
+      ) {
+        return this.#startPromise
+      }
+      await this.#startPromise.catch(() => undefined)
+      return this.start(workspacePath, env, approvalMode)
+    }
+    this.#startingWorkspacePath = workspacePath
+    this.#startingApprovalMode = approvalMode
     this.#startPromise = this.#start(workspacePath, env, approvalMode).finally(
       () => {
         this.#startPromise = null
+        this.#startingWorkspacePath = null
+        this.#startingApprovalMode = null
       }
     )
     return this.#startPromise
@@ -323,6 +340,17 @@ export class RuntimeSupervisor extends EventEmitter {
   async restart(
     approvalMode: ApprovalMode = this.#snapshot.approvalMode ?? 'yolo',
     env: NodeJS.ProcessEnv = this.#workspaceEnv
+  ): Promise<RuntimeSnapshot> {
+    if (this.#restartPromise) return this.#restartPromise
+    this.#restartPromise = this.#restart(approvalMode, env).finally(() => {
+      this.#restartPromise = null
+    })
+    return this.#restartPromise
+  }
+
+  async #restart(
+    approvalMode: ApprovalMode,
+    env: NodeJS.ProcessEnv
   ): Promise<RuntimeSnapshot> {
     const workspacePath = this.#snapshot.workspacePath
     if (!workspacePath) {
@@ -793,6 +821,10 @@ export class RuntimeSupervisor extends EventEmitter {
           ? undefined
           : setTimeout(() => {
               this.#pending.delete(id)
+              const commandType = command['type']
+              this.#diagnostics.write(
+                `RPC_TIMEOUT: command=${typeof commandType === 'string' ? commandType : 'unknown'} generation=${generation}`
+              )
               reject(
                 new RuntimeFailure('RPC_TIMEOUT', 'OMP RPC 请求超时', true)
               )
@@ -897,13 +929,18 @@ export class RuntimeSupervisor extends EventEmitter {
       if (generation !== this.#generation) {
         throw new RuntimeFailure('CRASHED', 'Runtime 连接已失效', true)
       }
+      this.#publishSnapshots = false
       this.#setSnapshot({ status: 'ready', error: undefined })
       await this.request(
         { type: 'set_follow_up_mode', mode: 'one-at-a-time' },
         STATE_TIMEOUT_MS
       )
-      return await this.getState()
+      await this.getState()
+      this.#publishSnapshots = true
+      this.#setSnapshot({})
+      return this.snapshot
     } catch (error) {
+      this.#publishSnapshots = true
       let failure =
         error instanceof RuntimeFailure
           ? error
@@ -1288,7 +1325,7 @@ export class RuntimeSupervisor extends EventEmitter {
 
   #setSnapshot(patch: Partial<RuntimeSnapshot>): void {
     this.#snapshot = { ...this.#snapshot, ...patch }
-    this.emit('snapshot', this.snapshot)
+    if (this.#publishSnapshots) this.emit('snapshot', this.snapshot)
   }
 
   #rejectPending(error: RuntimeFailure): void {

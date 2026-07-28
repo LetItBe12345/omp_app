@@ -12,6 +12,9 @@ const useXvfb = process.platform === 'linux' && !process.env.DISPLAY
 const displayServer = process.env.OMP_DISPLAY_SERVER
 const softwareRendering = process.env.OMP_SMOKE_SOFTWARE_RENDERING === 'true'
 const terminateOnReady = process.env.OMP_SMOKE_TERMINATE_ON_READY === 'true'
+const runtimeSmoke = process.env.OMP_SMOKE_RUNTIME === 'true'
+const noSandbox = process.env.OMP_SMOKE_NO_SANDBOX === 'true'
+const readyMarker = runtimeSmoke ? 'OMP_RUNTIME_SMOKE_READY' : 'OMP_SMOKE_READY'
 
 if (displayServer && !['x11', 'wayland'].includes(displayServer)) {
   throw new Error(`不支持的 OMP_DISPLAY_SERVER：${displayServer}`)
@@ -30,10 +33,15 @@ const explicitElectronArgs =
       ? ['--ozone-platform=wayland']
       : []
 if (softwareRendering) explicitElectronArgs.push('--disable-gpu')
+if (noSandbox) explicitElectronArgs.push('--no-sandbox')
 const entrypoint = packagedExecutable ? undefined : 'out/main/index.js'
 const smokeArgs = entrypoint
-  ? [...explicitElectronArgs, entrypoint, '--smoke']
-  : [...explicitElectronArgs, '--smoke']
+  ? [
+      ...explicitElectronArgs,
+      entrypoint,
+      runtimeSmoke ? '--runtime-smoke' : '--smoke'
+    ]
+  : [...explicitElectronArgs, runtimeSmoke ? '--runtime-smoke' : '--smoke']
 const command = displayServer
   ? (packagedExecutable ?? electronBinary)
   : useXvfb
@@ -47,12 +55,12 @@ const args = displayServer
         packagedExecutable ?? electronBinary,
         '--ozone-platform=x11',
         ...(entrypoint ? [entrypoint] : []),
-        '--smoke'
+        runtimeSmoke ? '--runtime-smoke' : '--smoke'
       ]
     : smokeArgs
 
 console.log(
-  `Electron smoke 环境：arch=${process.arch} display=${displayServer ?? (useXvfb ? 'x11-xvfb' : 'auto')} executable=${packagedExecutable ?? 'source'} rendering=${softwareRendering ? 'software' : 'default'} shutdown=${terminateOnReady ? 'forced-after-ready' : 'normal'}`
+  `Electron smoke 环境：arch=${process.arch} display=${displayServer ?? (useXvfb ? 'x11-xvfb' : 'auto')} executable=${packagedExecutable ?? 'source'} rendering=${softwareRendering ? 'software' : 'default'} runtime=${runtimeSmoke ? 'required' : 'skipped'} shutdown=${terminateOnReady ? 'forced-after-ready' : 'normal'}`
 )
 
 const child = spawn(command, args, {
@@ -85,7 +93,7 @@ child.stdout.on('data', (chunk) => {
   const output = String(chunk)
   stdout += output
   process.stdout.write(output)
-  if (!rendererReady && stdout.includes('OMP_SMOKE_READY')) {
+  if (!rendererReady && stdout.includes(readyMarker)) {
     rendererReady = true
     clearTimeout(timeout)
     if (terminateOnReady) {
@@ -103,11 +111,14 @@ child.stdout.on('data', (chunk) => {
 
 child.stderr.on('data', (chunk) => process.stderr.write(chunk))
 
-let timeout = setTimeout(() => {
-  terminateChild()
-  console.error('Electron smoke 超时')
-  process.exitCode = 1
-}, 20_000)
+let timeout = setTimeout(
+  () => {
+    terminateChild()
+    console.error('Electron smoke 超时')
+    process.exitCode = 1
+  },
+  runtimeSmoke ? 45_000 : 20_000
+)
 
 child.on('error', (error) => {
   clearTimeout(timeout)

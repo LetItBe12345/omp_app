@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -42,6 +42,41 @@ describe('RuntimeSupervisor', () => {
       model: 'test/fake-model',
       thinkingLevel: 'medium'
     })
+  })
+
+  it('启动初始化完成后才发布 ready', async () => {
+    const fixture = resolve('tests/fixtures/fake-omp.mjs')
+    const commandLog = join(temporaryDirectory, 'commands.log')
+    supervisor = new RuntimeSupervisor({
+      runtimePath: process.execPath,
+      diagnostics,
+      spawnRuntime: (_executable, args, options) =>
+        spawn(process.execPath, [fixture, ...args], {
+          ...options,
+          env: { ...options.env, FAKE_COMMAND_LOG: commandLog },
+          stdio: ['pipe', 'pipe', 'pipe']
+        })
+    })
+    const catalogRequest = new Promise<void>(
+      (resolveCatalog, rejectCatalog) => {
+        supervisor.on('snapshot', (snapshot: { status?: string }) => {
+          if (snapshot.status !== 'ready') return
+          void supervisor
+            .getAvailableModels()
+            .then(() => resolveCatalog())
+            .catch(rejectCatalog)
+        })
+      }
+    )
+
+    await supervisor.start(process.cwd())
+    await catalogRequest
+
+    expect((await readFile(commandLog, 'utf8')).trim().split('\n')).toEqual([
+      'set_follow_up_mode',
+      'get_state',
+      'get_available_models'
+    ])
   })
 
   it('使用固定参数数组传入 Session 权限', async () => {
@@ -102,6 +137,62 @@ describe('RuntimeSupervisor', () => {
     })
 
     expect(spawnedValues).toEqual(['login-shell', 'manual-proxy'])
+  })
+
+  it('不同 Workspace 的并发启动按请求顺序切换 Runtime', async () => {
+    const fixture = resolve('tests/fixtures/fake-omp.mjs')
+    const firstWorkspace = join(temporaryDirectory, 'first-workspace')
+    const secondWorkspace = join(temporaryDirectory, 'second-workspace')
+    await Promise.all([
+      mkdir(firstWorkspace, { recursive: true }),
+      mkdir(secondWorkspace, { recursive: true })
+    ])
+    const spawnedWorkspaces: string[] = []
+    supervisor = new RuntimeSupervisor({
+      runtimePath: process.execPath,
+      diagnostics,
+      spawnRuntime: (_executable, args, options) => {
+        spawnedWorkspaces.push(String(options.cwd))
+        return spawn(process.execPath, [fixture, ...args], {
+          ...options,
+          stdio: ['pipe', 'pipe', 'pipe']
+        })
+      }
+    })
+
+    const first = supervisor.start(firstWorkspace)
+    const second = supervisor.start(secondWorkspace)
+    await Promise.all([first, second])
+
+    expect(spawnedWorkspaces).toEqual([firstWorkspace, secondWorkspace])
+    expect(supervisor.snapshot).toMatchObject({
+      status: 'ready',
+      workspacePath: secondWorkspace
+    })
+  })
+
+  it('并发重启只替换一次 Runtime', async () => {
+    const fixture = resolve('tests/fixtures/fake-omp.mjs')
+    let spawnCount = 0
+    supervisor = new RuntimeSupervisor({
+      runtimePath: process.execPath,
+      diagnostics,
+      spawnRuntime: (_executable, args, options) => {
+        spawnCount += 1
+        return spawn(process.execPath, [fixture, ...args], {
+          ...options,
+          stdio: ['pipe', 'pipe', 'pipe']
+        })
+      }
+    })
+    await supervisor.start(process.cwd())
+
+    const first = supervisor.restart()
+    const second = supervisor.restart()
+    await Promise.all([first, second])
+
+    expect(spawnCount).toBe(2)
+    expect(supervisor.snapshot.status).toBe('ready')
   })
 
   it('关闭前刷新 Runtime 诊断日志', async () => {

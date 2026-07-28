@@ -27,14 +27,16 @@ import { configureLinuxInputMethod } from './linux-input-method'
 import { registerWorkspaceFilesIpc } from './workspace-files'
 
 const development = Boolean(process.env['ELECTRON_RENDERER_URL'])
-const smokeMode = process.argv.includes('--smoke')
+const runtimeSmokeMode = process.argv.includes('--runtime-smoke')
+const smokeMode = process.argv.includes('--smoke') || runtimeSmokeMode
 const setupProviderMode = process.argv.includes('--setup-provider')
 const supportedCliFlags = new Set([
   '--version',
   '--disable-gpu',
   '--no-sandbox',
   '--setup-provider',
-  '--smoke'
+  '--smoke',
+  '--runtime-smoke'
 ])
 function isSupportedCliArg(arg: string): boolean {
   return (
@@ -50,6 +52,7 @@ let mainWindow: BrowserWindow | null = null
 let smokeFinishing = false
 let shutdownStarted = false
 let cleanupWorkspaceFiles: (() => void) | undefined
+let runtimeRestorePromise: Promise<void> | null = null
 
 configureLinuxFileChooser(app.commandLine)
 const linuxInputMethod = configureLinuxInputMethod(app.commandLine)
@@ -202,8 +205,30 @@ function registerIpc(): void {
   })
 
   ipcMain.on(IPC_CHANNELS.rendererReady, () => {
-    if (smokeMode) void finishSmoke()
+    if (runtimeSmokeMode) void finishRuntimeSmoke()
+    else if (smokeMode) void finishSmoke()
   })
+}
+
+async function finishRuntimeSmoke(): Promise<void> {
+  try {
+    const deadline = Date.now() + 30_000
+    while (!runtimeRestorePromise) {
+      if (Date.now() >= deadline)
+        throw new Error('Runtime smoke 等待恢复任务超时')
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    await runtimeRestorePromise
+    if (runtimeSupervisor.snapshot.status !== 'ready') {
+      throw new Error(
+        `Runtime smoke 启动失败：${runtimeSupervisor.snapshot.error?.message ?? '未知错误'}`
+      )
+    }
+    await finishSmoke()
+  } catch (error) {
+    log.error('Runtime smoke 失败', error)
+    app.exit(1)
+  }
 }
 
 async function finishSmoke(): Promise<void> {
@@ -250,7 +275,11 @@ async function finishSmoke(): Promise<void> {
         ) + '\n'
       )
     }
-    process.stdout.write('OMP_SMOKE_READY\n', () => app.exit(0))
+    if (runtimeSmokeMode) await runtimeSupervisor.stop()
+    const marker = runtimeSmokeMode
+      ? 'OMP_RUNTIME_SMOKE_READY'
+      : 'OMP_SMOKE_READY'
+    process.stdout.write(`${marker}\n`, () => app.exit(0))
   } catch (error) {
     log.error('Smoke 收尾失败', error)
     app.exit(1)
@@ -420,7 +449,8 @@ if (hasSingleInstanceLock) {
       undefined,
       runtimeSupervisor
     )
-    if (!smokeMode) void restoreRuntimeState()
+    if (!smokeMode || runtimeSmokeMode)
+      runtimeRestorePromise = restoreRuntimeState()
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
