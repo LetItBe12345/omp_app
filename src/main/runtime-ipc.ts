@@ -501,12 +501,7 @@ export function registerRuntimeIpc(
     }
   }
 
-  const onSnapshot = (snapshot: RuntimeSnapshot): void => {
-    if (
-      activatingWorkspacePath &&
-      snapshot.workspacePath !== activatingWorkspacePath
-    )
-      return
+  const publishSnapshot = (snapshot: RuntimeSnapshot): void => {
     if (snapshot.status === 'failed' || snapshot.status === 'stopped') {
       clearPendingExtensionUi()
       clearToolApprovalTimers()
@@ -520,6 +515,11 @@ export function registerRuntimeIpc(
     if (snapshot.status === 'ready' && !hostUriRegistered)
       void ensureHostUriRegistered()
     send({ type: 'snapshot', snapshot })
+  }
+
+  const onSnapshot = (snapshot: RuntimeSnapshot): void => {
+    if (activatingWorkspacePath) return
+    publishSnapshot(snapshot)
   }
 
   const ensureHostUriRegistered = async (): Promise<void> => {
@@ -817,17 +817,20 @@ export function registerRuntimeIpc(
       approvalModeChanging: true
     }
     activatingWorkspacePath = workspace.path
+    hostUriRegistered = false
     send({ type: 'snapshot', snapshot: startingSnapshot })
 
     void (async () => {
+      let activationFailureSnapshot: RuntimeSnapshot | undefined
       try {
         let activeSession:
           Awaited<ReturnType<typeof requireSession>>['session'] | undefined
         let approvalMode: ApprovalMode = 'yolo'
         if (workspace.activeSessionId) {
+          const storedSessionId = workspace.activeSessionId
           try {
             activeSession = (
-              await requireSession(workspace.id, workspace.activeSessionId)
+              await requireSession(workspace.id, storedSessionId)
             ).session
             approvalMode = await sessionApprovalMode(
               workspace.id,
@@ -835,6 +838,11 @@ export function registerRuntimeIpc(
             )
           } catch (error) {
             log.warn('读取 Workspace 活动 Session 失败', error)
+            await stateStore
+              .clearActiveSessionIfMatches(workspace.id, storedSessionId)
+              .catch((persistError: unknown) =>
+                log.warn('清理失效的活动 Session 失败', persistError)
+              )
           }
         }
         try {
@@ -854,19 +862,15 @@ export function registerRuntimeIpc(
           })
         } catch (error) {
           log.warn('Workspace Runtime 启动失败', error)
-          if (
+          activationFailureSnapshot =
             supervisor.snapshot.workspacePath !== workspace.path ||
             supervisor.snapshot.status !== 'failed'
-          ) {
-            send({
-              type: 'snapshot',
-              snapshot: {
-                ...startingSnapshot,
-                status: 'failed',
-                error: runtimeError(error)
-              }
-            })
-          }
+              ? {
+                  ...startingSnapshot,
+                  status: 'failed',
+                  error: runtimeError(error)
+                }
+              : supervisor.snapshot
           return
         }
 
@@ -876,6 +880,16 @@ export function registerRuntimeIpc(
             await supervisor.switchSession(activeSession.id)
           } catch (error) {
             log.warn('恢复 Workspace 的活动 Session 失败', error)
+            if (
+              error instanceof RuntimeFailure &&
+              error.code === 'SESSION_NOT_FOUND'
+            ) {
+              await stateStore
+                .clearActiveSessionIfMatches(workspace.id, activeSession.id)
+                .catch((persistError: unknown) =>
+                  log.warn('清理失效的活动 Session 失败', persistError)
+                )
+            }
             send({
               type: 'workspace-activation-failed',
               error: runtimeError(error)
@@ -883,8 +897,10 @@ export function registerRuntimeIpc(
           }
         }
       } finally {
-        if (activatingWorkspacePath === workspace.path)
+        if (activatingWorkspacePath === workspace.path) {
           activatingWorkspacePath = null
+          publishSnapshot(activationFailureSnapshot ?? supervisor.snapshot)
+        }
       }
     })()
 

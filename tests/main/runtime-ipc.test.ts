@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { IPC_CHANNELS } from '../../src/shared/desktop-api'
 import type { DesktopStateStore } from '../../src/main/desktop-state'
 import type { RuntimeSupervisor } from '../../src/main/runtime-supervisor'
+import type * as SessionCatalog from '../../src/main/session-catalog'
 
 function createStateStore(): DesktopStateStore {
   return {
@@ -27,6 +28,15 @@ const electron = vi.hoisted(() => ({
   listeners: new Map<string, (...args: unknown[]) => unknown>(),
   removeHandler: vi.fn(),
   send: vi.fn()
+}))
+
+const sessionCatalog = vi.hoisted(() => ({
+  listWorkspaceSessions: vi.fn()
+}))
+
+vi.mock('../../src/main/session-catalog', async (importOriginal) => ({
+  ...(await importOriginal<typeof SessionCatalog>()),
+  listWorkspaceSessions: sessionCatalog.listWorkspaceSessions
 }))
 
 vi.mock('electron', () => ({
@@ -64,6 +74,8 @@ describe('registerRuntimeIpc', () => {
     electron.showItemInFolder.mockReset()
     electron.showMessageBox.mockReset()
     electron.showOpenDialog.mockReset()
+    sessionCatalog.listWorkspaceSessions.mockReset()
+    sessionCatalog.listWorkspaceSessions.mockResolvedValue([])
   })
 
   it('Renderer 重载后重放尚未回答的 Extension UI 请求', async () => {
@@ -501,6 +513,128 @@ describe('registerRuntimeIpc', () => {
     cleanup()
   })
 
+  it('Workspace 激活完成前不发布 ready，并清理失效的活动 Session', async () => {
+    const { registerRuntimeIpc } = await import('../../src/main/runtime-ipc')
+    const harness = createHarness()
+    const workspace: {
+      id: string
+      path: string
+      addedAt: string
+      lastUsedAt: string
+      pinned: boolean
+      activeSessionId?: string
+    } = {
+      id: 'workspace-new',
+      path: '/tmp/new-workspace',
+      addedAt: '2026-07-24T00:00:00.000Z',
+      lastUsedAt: '2026-07-24T00:00:00.000Z',
+      pinned: false,
+      activeSessionId: 'missing-session'
+    }
+    const clearActiveSessionIfMatches = vi.fn(
+      async (_workspaceId: string, sessionId: string) => {
+        if (workspace.activeSessionId !== sessionId) return false
+        delete workspace.activeSessionId
+        return true
+      }
+    )
+    const stateStore = {
+      state: {
+        version: 1,
+        activeWorkspaceId: workspace.id,
+        workspaces: [workspace],
+        sessionPreferences: {},
+        ui: {}
+      },
+      requireWorkspace: vi.fn().mockReturnValue(workspace),
+      activateWorkspace: vi.fn().mockResolvedValue(workspace),
+      sessionPreference: vi.fn().mockReturnValue({ approvalMode: 'yolo' }),
+      clearActiveSessionIfMatches,
+      runtimeNetworkConfig: vi.fn().mockReturnValue({ mode: 'auto' })
+    } as unknown as DesktopStateStore
+    let finishStart: (() => void) | undefined
+    harness.supervisor.snapshot = {
+      status: 'ready',
+      workspacePath: '/tmp/old-workspace',
+      isStreaming: false,
+      queuedMessageCount: 0
+    }
+    harness.supervisor.start = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          finishStart = () => {
+            harness.supervisor.snapshot = {
+              status: 'ready',
+              workspacePath: workspace.path,
+              sessionId: 'runtime-session',
+              isStreaming: false,
+              queuedMessageCount: 0
+            }
+            harness.emitter.emit('snapshot', harness.supervisor.snapshot)
+            resolve(harness.supervisor.snapshot)
+          }
+        })
+    )
+    const cleanup = registerRuntimeIpc(
+      harness.supervisor as unknown as RuntimeSupervisor,
+      stateStore,
+      harness.getWindow,
+      undefined,
+      {
+        resolve: vi.fn().mockResolvedValue({ env: {}, sourceError: undefined })
+      } as never
+    )
+
+    const result = await electron.handlers.get(
+      IPC_CHANNELS.activateWorkspace
+    )?.(harness.event, workspace.id)
+    expect(result).toMatchObject({
+      ok: true,
+      data: { status: 'starting', workspacePath: workspace.path }
+    })
+    await vi.waitFor(() =>
+      expect(clearActiveSessionIfMatches).toHaveBeenCalledWith(
+        workspace.id,
+        'missing-session'
+      )
+    )
+    expect(
+      vi
+        .mocked(electron.send)
+        .mock.calls.some(
+          (call) =>
+            (call[1] as { type?: string; snapshot?: { status?: string } })
+              ?.type === 'snapshot' &&
+            (call[1] as { snapshot?: { status?: string } }).snapshot?.status ===
+              'ready'
+        )
+    ).toBe(false)
+
+    electron.send.mockClear()
+    finishStart?.()
+    await vi.waitFor(() =>
+      expect(electron.send).toHaveBeenCalledWith(IPC_CHANNELS.event, {
+        type: 'snapshot',
+        snapshot: expect.objectContaining({
+          status: 'ready',
+          workspacePath: workspace.path
+        })
+      })
+    )
+    expect(
+      vi
+        .mocked(electron.send)
+        .mock.calls.filter(
+          (call) =>
+            (call[1] as { type?: string; snapshot?: { status?: string } })
+              ?.type === 'snapshot' &&
+            (call[1] as { snapshot?: { status?: string } }).snapshot?.status ===
+              'ready'
+        )
+    ).toHaveLength(1)
+    cleanup()
+  })
+
   it('v17.0.6 工具审批只向 Renderer 投影摘要并按截止时间自动允许', async () => {
     vi.useFakeTimers()
     try {
@@ -686,6 +820,7 @@ type HarnessSupervisor = EventEmitter & {
   switchSession: ReturnType<typeof vi.fn>
   setToolApprovals: ReturnType<typeof vi.fn>
   setCompatibilityNotice: ReturnType<typeof vi.fn>
+  setHostUriSchemes: ReturnType<typeof vi.fn>
   snapshot: {
     status: string
     workspacePath?: string
@@ -713,6 +848,7 @@ function createHarness(): {
     switchSession: vi.fn(),
     setToolApprovals: vi.fn(),
     setCompatibilityNotice: vi.fn(),
+    setHostUriSchemes: vi.fn().mockResolvedValue(undefined),
     snapshot: {
       status: 'ready',
       isStreaming: false,

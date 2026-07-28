@@ -153,7 +153,25 @@ async function restoreRuntimeState(): Promise<void> {
         await runtimeSupervisor.switchSession(session.id)
       } catch (error) {
         log.warn('上次 Session 不可用，改为新建 Session', error)
-        await runtimeSupervisor.newSession()
+        const staleSessionId = workspace.activeSessionId
+        if (staleSessionId)
+          await desktopStateStore
+            .clearActiveSessionIfMatches(workspace.id, staleSessionId)
+            .catch((persistError: unknown) =>
+              log.warn('清理失效的活动 Session 失败', persistError)
+            )
+        const snapshot = await runtimeSupervisor.newSession()
+        if (snapshot.sessionId) {
+          await desktopStateStore.updateSessionPreference(
+            workspace.id,
+            snapshot.sessionId,
+            { approvalMode }
+          )
+          await desktopStateStore.setActiveSession(
+            workspace.id,
+            snapshot.sessionId
+          )
+        }
         const window = mainWindow
         if (window && !window.isDestroyed()) {
           void dialog.showMessageBox(window, {

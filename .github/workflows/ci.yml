@@ -36,6 +36,8 @@ jobs:
         run: pnpm lint
       - name: Format check
         run: pnpm format:check
+      - name: Workspace and Session regression tests
+        run: pnpm test:workspace-session
       - name: Test
         run: pnpm test
       - name: Fake RPC smoke

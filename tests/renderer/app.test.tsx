@@ -167,6 +167,213 @@ describe('App shell', () => {
     expect(screen.getByRole('button', { name: '选择推理强度' })).toBeEnabled()
   })
 
+  it('切换 Workspace 时立即移除旧 Session，成功后显示目标列表', async () => {
+    const workspaces = [
+      {
+        id: 'workspace-a',
+        path: '/tmp/workspace-a',
+        name: 'workspace-a',
+        available: true,
+        pinned: false,
+        addedAt: '2026-01-01T00:00:00.000Z',
+        lastUsedAt: '2026-01-01T00:00:00.000Z'
+      },
+      {
+        id: 'workspace-b',
+        path: '/tmp/workspace-b',
+        name: 'workspace-b',
+        available: true,
+        pinned: false,
+        addedAt: '2026-01-02T00:00:00.000Z',
+        lastUsedAt: '2026-01-02T00:00:00.000Z'
+      }
+    ]
+    const session = (id: string, workspaceId: string, title: string) => ({
+      id,
+      workspaceId,
+      path: `/tmp/${id}.jsonl`,
+      title,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      modifiedAt: '2026-01-01T00:00:00.000Z',
+      messageCount: 1,
+      size: 1,
+      pinned: false,
+      archived: false,
+      compatibility: 'v3' as const,
+      status: 'complete' as const
+    })
+    vi.mocked(window.desktop.getWorkspaces)
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          activeWorkspaceId: 'workspace-a',
+          workspaces,
+          hasMore: false
+        }
+      })
+      .mockResolvedValue({
+        ok: true,
+        data: {
+          activeWorkspaceId: 'workspace-b',
+          workspaces,
+          hasMore: false
+        }
+      })
+    vi.mocked(window.desktop.getRuntimeState).mockResolvedValue({
+      ok: true,
+      data: {
+        status: 'ready',
+        workspacePath: '/tmp/workspace-a',
+        sessionId: 'session-a',
+        isStreaming: false,
+        queuedMessageCount: 0
+      }
+    })
+    let finishTargetSessions:
+      | ((
+          value: Awaited<ReturnType<typeof window.desktop.listSessions>>
+        ) => void)
+      | undefined
+    vi.mocked(window.desktop.listSessions).mockImplementation((workspaceId) => {
+      if (workspaceId === 'workspace-a')
+        return Promise.resolve({
+          ok: true,
+          data: {
+            sessions: [session('session-a', workspaceId, '旧会话')],
+            hasMore: false,
+            nextOffset: 0
+          }
+        })
+      return new Promise((resolve) => {
+        finishTargetSessions = resolve
+      })
+    })
+    vi.mocked(window.desktop.activateWorkspace).mockResolvedValue({
+      ok: true,
+      data: {
+        status: 'starting',
+        workspacePath: '/tmp/workspace-b',
+        isStreaming: false,
+        queuedMessageCount: 0
+      }
+    })
+    render(<App />)
+
+    expect(await screen.findByText('旧会话')).toBeInTheDocument()
+    const targetWorkspace = screen.getByRole('button', {
+      name: 'workspace-b'
+    })
+    fireEvent.click(targetWorkspace)
+    fireEvent.click(targetWorkspace)
+    expect(window.desktop.activateWorkspace).toHaveBeenCalledTimes(1)
+    await waitFor(() =>
+      expect(screen.queryByText('旧会话')).not.toBeInTheDocument()
+    )
+    await waitFor(() =>
+      expect(window.desktop.listSessions).toHaveBeenCalledWith(
+        'workspace-b',
+        0,
+        ''
+      )
+    )
+
+    finishTargetSessions?.({
+      ok: true,
+      data: {
+        sessions: [session('session-b', 'workspace-b', '目标会话')],
+        hasMore: false,
+        nextOffset: 0
+      }
+    })
+    expect(
+      await screen.findByRole('button', { name: '目标会话' })
+    ).toBeDisabled()
+  })
+
+  it('Session 切换成功后清除上一次失败提示', async () => {
+    vi.mocked(window.desktop.getWorkspaces).mockResolvedValue({
+      ok: true,
+      data: {
+        activeWorkspaceId: 'workspace-1',
+        workspaces: [
+          {
+            id: 'workspace-1',
+            path: '/tmp/workspace',
+            name: 'workspace',
+            available: true,
+            pinned: false,
+            addedAt: '2026-01-01T00:00:00.000Z',
+            lastUsedAt: '2026-01-01T00:00:00.000Z'
+          }
+        ],
+        hasMore: false
+      }
+    })
+    vi.mocked(window.desktop.getRuntimeState).mockResolvedValue({
+      ok: true,
+      data: {
+        status: 'ready',
+        workspacePath: '/tmp/workspace',
+        sessionId: 'session-1',
+        isStreaming: false,
+        queuedMessageCount: 0
+      }
+    })
+    vi.mocked(window.desktop.listSessions).mockResolvedValue({
+      ok: true,
+      data: {
+        sessions: [
+          {
+            id: 'session-2',
+            workspaceId: 'workspace-1',
+            path: '/tmp/session-2.jsonl',
+            title: '第二个会话',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            modifiedAt: '2026-01-01T00:00:00.000Z',
+            messageCount: 1,
+            size: 1,
+            pinned: false,
+            archived: false,
+            compatibility: 'v3',
+            status: 'complete'
+          }
+        ],
+        hasMore: false,
+        nextOffset: 0
+      }
+    })
+    vi.mocked(window.desktop.switchSession)
+      .mockResolvedValueOnce({
+        ok: false,
+        error: {
+          code: 'SESSION_NOT_FOUND',
+          message: 'Session 不存在',
+          retryable: false
+        }
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          status: 'ready',
+          workspacePath: '/tmp/workspace',
+          sessionId: 'session-2',
+          isStreaming: false,
+          queuedMessageCount: 0
+        }
+      })
+    render(<App />)
+
+    const sessionButton = await screen.findByRole('button', {
+      name: '第二个会话'
+    })
+    fireEvent.click(sessionButton)
+    expect(await screen.findByText('Session 不存在')).toBeInTheDocument()
+    fireEvent.click(sessionButton)
+    await waitFor(() =>
+      expect(screen.queryByText('Session 不存在')).not.toBeInTheDocument()
+    )
+  })
+
   it('运行中使用 Stop 按钮和 Ctrl+C 停止同一任务', async () => {
     vi.mocked(window.desktop.getRuntimeState).mockResolvedValueOnce({
       ok: true,

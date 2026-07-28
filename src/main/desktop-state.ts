@@ -180,6 +180,18 @@ export class DesktopStateStore {
     })
   }
 
+  async clearActiveSessionIfMatches(
+    workspaceId: string,
+    sessionId: string
+  ): Promise<boolean> {
+    return this.#commit(() => {
+      const workspace = this.requireWorkspace(workspaceId)
+      if (workspace.activeSessionId !== sessionId) return false
+      workspace.activeSessionId = undefined
+      return true
+    })
+  }
+
   async removeWorkspace(id: string): Promise<void> {
     await this.#commit(() => {
       this.requireWorkspace(id)
