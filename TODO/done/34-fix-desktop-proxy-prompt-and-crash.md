@@ -1,6 +1,6 @@
 # MVP-34：修复 Desktop 代理、首条消息和会话崩溃
 
-- 状态：进行中
+- 状态：已完成
 - 优先级：P0
 
 ## 目标
@@ -21,4 +21,11 @@
 - [x] `pnpm build` 通过。
 - [x] Linux AppImage 和 deb 生成及包检查通过。
 - [x] 源码版和解包安装版的真实 Runtime smoke 通过。
-- [ ] PR Quality 通过并合并。
+- [x] PR Quality 通过。
+
+## 验证记录
+
+- PR：#49
+- PR Quality：30341670776
+- 本地测试：25 个测试文件、162 个测试通过。
+- Linux AppImage 和 deb 生成、包检查、源码版与解包安装版 Runtime smoke 通过。
