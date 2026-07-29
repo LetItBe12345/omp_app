@@ -949,16 +949,25 @@ export function App(): React.JSX.Element {
   const sessionRequestId = useRef(0)
   const workspaceRequestPending = useRef(false)
   const runtimeReadyRef = useRef(false)
+  const temporarySessionRef = useRef(temporarySession)
   const activeWorkspaceId = overview.activeWorkspaceId
   const activeWorkspaceIdRef = useRef(activeWorkspaceId)
   const sessionSearchRef = useRef(sessionSearch)
   const runtimeRef = useRef(runtime)
   const currentProjectionKey = runtimeSessionKey(runtime)
+  const visibleRuntime = useMemo(
+    () =>
+      temporarySession
+        ? { ...runtime, sessionId: undefined, sessionName: undefined }
+        : runtime,
+    [runtime, temporarySession]
+  )
 
   useLayoutEffect(() => {
     projectionRef.current = projection
     runtimeRef.current = runtime
-  }, [projection, runtime])
+    temporarySessionRef.current = temporarySession
+  }, [projection, runtime, temporarySession])
 
   useLayoutEffect(() => {
     activeWorkspaceIdRef.current = activeWorkspaceId
@@ -974,7 +983,8 @@ export function App(): React.JSX.Element {
       const nextProjectionId = runtimeSessionKey(snapshot)
       if (nextProjectionId !== projectionSessionId.current) {
         projectionSessionId.current = nextProjectionId
-        if (!preserveProjection) setProjection(createConversationProjection())
+        if (!preserveProjection && !temporarySessionRef.current)
+          setProjection(createConversationProjection())
       }
       setSlashCatalog((current) => {
         if (current.sessionKey === nextProjectionId) return current
@@ -1165,6 +1175,7 @@ export function App(): React.JSX.Element {
         [key: string]: unknown
       }): void => {
         if (ompEvent.type === 'runtime_interrupted') {
+          if (temporarySessionRef.current) return
           const input = ompEvent['input']
           if (
             input &&
@@ -1231,6 +1242,7 @@ export function App(): React.JSX.Element {
           })
           return
         }
+        if (temporarySessionRef.current) return
         setProjection((current) => reduceOmpEvent(current, ompEvent))
       }
       if (event.type === 'omp-event') handleOmpEvent(event.event)
@@ -1319,6 +1331,7 @@ export function App(): React.JSX.Element {
   ])
 
   useEffect(() => {
+    if (temporarySession) return
     if (
       runtime.status !== 'ready' ||
       !runtime.sessionId ||
@@ -1353,7 +1366,12 @@ export function App(): React.JSX.Element {
       cancelled = true
       window.clearTimeout(loadingTimer)
     }
-  }, [currentProjectionKey, runtime.sessionId, runtime.status])
+  }, [
+    currentProjectionKey,
+    runtime.sessionId,
+    runtime.status,
+    temporarySession
+  ])
 
   const openWorkspace = async (): Promise<void> => {
     if (workspaceRequestPending.current) return
@@ -1500,6 +1518,7 @@ export function App(): React.JSX.Element {
                     }
                     applySnapshot(detached.data)
                     setTemporarySession(true)
+                    setOpeningSession(false)
                     setTemporaryApprovalMode('yolo')
                     setComposerInput('')
                     setReferences([])
@@ -1542,6 +1561,7 @@ export function App(): React.JSX.Element {
                   applySnapshot(left.data)
                   if (!alternative) {
                     setTemporarySession(true)
+                    setOpeningSession(false)
                     setTemporaryApprovalMode('yolo')
                     setComposerInput('')
                     setReferences([])
@@ -1584,6 +1604,7 @@ export function App(): React.JSX.Element {
                 return
               }
               setTemporarySession(true)
+              setOpeningSession(false)
               setTemporaryApprovalMode('yolo')
               setComposerInput('')
               setReferences([])
@@ -1592,7 +1613,7 @@ export function App(): React.JSX.Element {
               setProjection(createConversationProjection())
               setSessionError(null)
             }}
-            runtime={runtime}
+            runtime={visibleRuntime}
             overview={overview}
             onOpenWorkspace={() => void openWorkspace()}
             openingWorkspace={openingWorkspace}
@@ -1642,14 +1663,14 @@ export function App(): React.JSX.Element {
               )
               return undefined
             }}
-            runtime={runtime}
+            runtime={visibleRuntime}
             workspaceId={activeWorkspaceId}
           />
         </Panel>
         <Separator className="resize-handle" id="files-conversation" />
         <Panel defaultSize="65%" id="conversation" minSize={480}>
           <Conversation
-            runtime={runtime}
+            runtime={visibleRuntime}
             onSnapshot={applySnapshot}
             projection={projection}
             setProjection={setProjection}

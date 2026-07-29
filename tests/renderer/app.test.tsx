@@ -712,6 +712,152 @@ describe('App shell', () => {
     ).toBeInTheDocument()
   })
 
+  it('临时新会话忽略旧会话迟到的历史和 Runtime 快照，显式切回后才恢复', async () => {
+    let runtimeListener:
+      Parameters<typeof window.desktop.onRuntimeEvent>[0] | undefined
+    vi.mocked(window.desktop.onRuntimeEvent).mockImplementationOnce(
+      (listener) => {
+        runtimeListener = listener
+        return vi.fn()
+      }
+    )
+    vi.mocked(window.desktop.getWorkspaces).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        activeWorkspaceId: 'workspace-1',
+        workspaces: [
+          {
+            id: 'workspace-1',
+            path: '/tmp/workspace',
+            name: 'workspace',
+            available: true,
+            pinned: false,
+            addedAt: '2026-01-01T00:00:00.000Z',
+            lastUsedAt: '2026-01-01T00:00:00.000Z'
+          }
+        ],
+        hasMore: false
+      }
+    })
+    vi.mocked(window.desktop.getRuntimeState).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        status: 'ready',
+        workspacePath: '/tmp/workspace',
+        sessionId: 'old-session',
+        sessionName: '旧会话',
+        isStreaming: false,
+        queuedMessageCount: 0
+      }
+    })
+    vi.mocked(window.desktop.listSessions).mockResolvedValue({
+      ok: true,
+      data: {
+        sessions: [
+          {
+            id: 'old-session',
+            workspaceId: 'workspace-1',
+            path: '/tmp/old-session.jsonl',
+            title: '旧会话',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            modifiedAt: '2026-01-01T00:00:00.000Z',
+            messageCount: 1,
+            size: 1,
+            pinned: false,
+            archived: false,
+            compatibility: 'v3',
+            status: 'complete'
+          }
+        ],
+        hasMore: false,
+        nextOffset: 0
+      }
+    })
+    const oldHistory = [
+      {
+        role: 'user',
+        content: [{ type: 'text', text: '旧会话内容' }]
+      }
+    ]
+    let finishOldHistory:
+      | ((
+          value: Awaited<ReturnType<typeof window.desktop.getMessages>>
+        ) => void)
+      | undefined
+    vi.mocked(window.desktop.getMessages)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishOldHistory = resolve
+          })
+      )
+      .mockResolvedValueOnce({ ok: true, data: oldHistory })
+    vi.mocked(window.desktop.switchSession).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        status: 'ready',
+        workspacePath: '/tmp/workspace',
+        sessionId: 'old-session',
+        sessionName: '旧会话',
+        isStreaming: false,
+        queuedMessageCount: 0
+      }
+    })
+    render(<App />)
+
+    const oldSessionButton = await screen.findByRole('button', {
+      name: '旧会话'
+    })
+    await waitFor(() => expect(window.desktop.getMessages).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: '新建对话' }))
+
+    expect(oldSessionButton).not.toHaveClass('bg-[var(--surface-selected)]')
+    expect(screen.getByText('开始处理本地项目')).toBeInTheDocument()
+    act(() => {
+      runtimeListener?.({
+        type: 'snapshot',
+        snapshot: {
+          status: 'ready',
+          workspacePath: '/tmp/workspace',
+          sessionId: 'old-session',
+          sessionName: '旧会话',
+          isStreaming: false,
+          queuedMessageCount: 0
+        }
+      })
+      runtimeListener?.({
+        type: 'omp-event-batch',
+        events: [
+          { type: 'agent_start' },
+          {
+            type: 'message_end',
+            message: {
+              id: 'late-assistant',
+              role: 'assistant',
+              content: [{ type: 'text', text: '迟到的实时回复' }]
+            }
+          },
+          { type: 'agent_end' }
+        ]
+      })
+    })
+    finishOldHistory?.({ ok: true, data: oldHistory })
+
+    await waitFor(() =>
+      expect(screen.queryByText('旧会话内容')).not.toBeInTheDocument()
+    )
+    expect(screen.queryByText('迟到的实时回复')).not.toBeInTheDocument()
+    expect(screen.getByText('开始处理本地项目')).toBeInTheDocument()
+    expect(window.desktop.getMessages).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(oldSessionButton)
+    await waitFor(() =>
+      expect(window.desktop.switchSession).toHaveBeenCalledWith('old-session')
+    )
+    expect(await screen.findByText('旧会话内容')).toBeInTheDocument()
+    expect(window.desktop.getMessages).toHaveBeenCalledTimes(2)
+  })
+
   it('新 Session 创建请求返回前立即显示用户首条消息', async () => {
     vi.mocked(window.desktop.getWorkspaces).mockResolvedValueOnce({
       ok: true,
