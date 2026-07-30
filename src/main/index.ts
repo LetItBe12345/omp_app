@@ -160,18 +160,9 @@ async function restoreRuntimeState(): Promise<void> {
             .catch((persistError: unknown) =>
               log.warn('清理失效的活动 Session 失败', persistError)
             )
-        const snapshot = await runtimeSupervisor.newSession()
-        if (snapshot.sessionId) {
-          await desktopStateStore.updateSessionPreference(
-            workspace.id,
-            snapshot.sessionId,
-            { approvalMode }
-          )
-          await desktopStateStore.setActiveSession(
-            workspace.id,
-            snapshot.sessionId
-          )
-        }
+        // 空 Session 要到首条消息提交后才会写入 JSONL。
+        // 这里只重置 Runtime，不把尚未存在的 Session ID 写入状态。
+        await runtimeSupervisor.newSession()
         const window = mainWindow
         if (window && !window.isDestroyed()) {
           void dialog.showMessageBox(window, {

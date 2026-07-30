@@ -230,7 +230,7 @@ export type SessionPage = {
 
 export type CreatedSession = {
   snapshot: RuntimeSnapshot
-  session: SessionSummary
+  session?: SessionSummary
 }
 
 export type ContextCandidate = {

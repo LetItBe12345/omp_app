@@ -954,6 +954,7 @@ export function App(): React.JSX.Element {
   const activeWorkspaceIdRef = useRef(activeWorkspaceId)
   const sessionSearchRef = useRef(sessionSearch)
   const runtimeRef = useRef(runtime)
+  const temporaryBaseSessionIdRef = useRef<string | undefined>(undefined)
   const currentProjectionKey = runtimeSessionKey(runtime)
   const visibleRuntime = useMemo(
     () =>
@@ -1000,6 +1001,7 @@ export function App(): React.JSX.Element {
           hasFreshSnapshot: cached.length > 0
         }
       })
+      runtimeRef.current = snapshot
       setRuntime(snapshot)
     },
     []
@@ -1045,6 +1047,7 @@ export function App(): React.JSX.Element {
 
   const resetSessionsForWorkspaceChange = useCallback((): void => {
     sessionRequestId.current += 1
+    temporaryBaseSessionIdRef.current = undefined
     setSessions([])
     setSessionNextOffset(0)
     setHasMoreSessions(false)
@@ -1174,8 +1177,13 @@ export function App(): React.JSX.Element {
         type: string
         [key: string]: unknown
       }): void => {
+        const temporaryCreationRunning =
+          temporarySessionRef.current &&
+          runtimeRef.current.isStreaming &&
+          Boolean(runtimeRef.current.sessionId) &&
+          runtimeRef.current.sessionId !== temporaryBaseSessionIdRef.current
         if (ompEvent.type === 'runtime_interrupted') {
-          if (temporarySessionRef.current) return
+          if (temporarySessionRef.current && !temporaryCreationRunning) return
           const input = ompEvent['input']
           if (
             input &&
@@ -1242,7 +1250,7 @@ export function App(): React.JSX.Element {
           })
           return
         }
-        if (temporarySessionRef.current) return
+        if (temporarySessionRef.current && !temporaryCreationRunning) return
         setProjection((current) => reduceOmpEvent(current, ompEvent))
       }
       if (event.type === 'omp-event') handleOmpEvent(event.event)
@@ -1457,6 +1465,7 @@ export function App(): React.JSX.Element {
       return
     }
     setTemporarySession(false)
+    temporaryBaseSessionIdRef.current = undefined
     setTemporaryApprovalMode('yolo')
     if (temporarySession) setComposerInput('')
     setRecentReferences([])
@@ -1517,6 +1526,7 @@ export function App(): React.JSX.Element {
                       return
                     }
                     applySnapshot(detached.data)
+                    temporaryBaseSessionIdRef.current = detached.data.sessionId
                     setTemporarySession(true)
                     setOpeningSession(false)
                     setTemporaryApprovalMode('yolo')
@@ -1560,6 +1570,7 @@ export function App(): React.JSX.Element {
                   }
                   applySnapshot(left.data)
                   if (!alternative) {
+                    temporaryBaseSessionIdRef.current = left.data.sessionId
                     setTemporarySession(true)
                     setOpeningSession(false)
                     setTemporaryApprovalMode('yolo')
@@ -1603,6 +1614,7 @@ export function App(): React.JSX.Element {
                 setSessionError('请先 Stop 当前任务')
                 return
               }
+              temporaryBaseSessionIdRef.current = runtimeRef.current.sessionId
               setTemporarySession(true)
               setOpeningSession(false)
               setTemporaryApprovalMode('yolo')
@@ -1690,15 +1702,20 @@ export function App(): React.JSX.Element {
             temporaryApprovalMode={temporaryApprovalMode}
             onTemporaryApprovalMode={setTemporaryApprovalMode}
             onSessionCreated={({ snapshot, session }) => {
+              temporaryBaseSessionIdRef.current = undefined
               setTemporarySession(false)
               setTemporaryApprovalMode('yolo')
               skipHistoryRestoreKey.current = runtimeSessionKey(snapshot)
               applySnapshot(snapshot, true)
               sessionRequestId.current += 1
-              setSessions((current) => [
-                session,
-                ...current.filter((item) => item.id !== session.id)
-              ])
+              if (session) {
+                setSessions((current) => [
+                  session,
+                  ...current.filter((item) => item.id !== session.id)
+                ])
+              } else if (activeWorkspaceId) {
+                void refreshSessions(activeWorkspaceId, 0, sessionSearch)
+              }
             }}
             openingSession={openingSession}
             recentReferences={recentReferences}

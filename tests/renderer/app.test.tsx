@@ -892,12 +892,134 @@ describe('App shell', () => {
     )
     render(<App />)
 
-    fireEvent.click(await screen.findByRole('button', { name: '新建对话' }))
+    const newSessionButton = await screen.findByRole('button', {
+      name: '新建对话'
+    })
+    await waitFor(() => expect(newSessionButton).toBeEnabled())
+    fireEvent.click(newSessionButton)
     const composer = screen.getByRole('textbox', { name: '任务输入' })
     fireEvent.change(composer, { target: { value: '面试会问什么' } })
     fireEvent.click(screen.getByRole('button', { name: '发送' }))
 
     expect(await screen.findByText('面试会问什么')).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '任务输入' })).toHaveValue('')
+  })
+
+  it('Session 文件延迟时保留首条消息并接收创建期间的实时事件', async () => {
+    let runtimeListener:
+      Parameters<typeof window.desktop.onRuntimeEvent>[0] | undefined
+    vi.mocked(window.desktop.onRuntimeEvent).mockImplementationOnce(
+      (listener) => {
+        runtimeListener = listener
+        return vi.fn()
+      }
+    )
+    vi.mocked(window.desktop.getWorkspaces).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        activeWorkspaceId: 'workspace-1',
+        workspaces: [
+          {
+            id: 'workspace-1',
+            path: '/tmp/workspace',
+            name: 'workspace',
+            available: true,
+            pinned: false,
+            addedAt: '2026-01-01T00:00:00.000Z',
+            lastUsedAt: '2026-01-01T00:00:00.000Z'
+          }
+        ],
+        hasMore: false
+      }
+    })
+    vi.mocked(window.desktop.getRuntimeState).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        status: 'ready',
+        workspacePath: '/tmp/workspace',
+        sessionId: 'old-session',
+        isStreaming: false,
+        queuedMessageCount: 0
+      }
+    })
+    vi.mocked(window.desktop.listSessions).mockResolvedValue({
+      ok: true,
+      data: { sessions: [], hasMore: false, nextOffset: 0 }
+    })
+    let finishCreate:
+      | ((
+          result: Awaited<ReturnType<typeof window.desktop.createSession>>
+        ) => void)
+      | undefined
+    vi.mocked(window.desktop.createSession).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishCreate = resolve
+      })
+    )
+    render(<App />)
+
+    const newSessionButton = await screen.findByRole('button', {
+      name: '新建对话'
+    })
+    await waitFor(() => expect(newSessionButton).toBeEnabled())
+    fireEvent.click(newSessionButton)
+    const composer = screen.getByRole('textbox', { name: '任务输入' })
+    fireEvent.change(composer, { target: { value: '检查新会话' } })
+    const sendButton = screen.getByRole('button', { name: '发送' })
+    await waitFor(() => expect(sendButton).toBeEnabled())
+    fireEvent.click(sendButton)
+    await waitFor(() => expect(window.desktop.createSession).toHaveBeenCalled())
+
+    act(() => {
+      runtimeListener?.({
+        type: 'snapshot',
+        snapshot: {
+          status: 'ready',
+          workspacePath: '/tmp/workspace',
+          sessionId: 'new-session',
+          isStreaming: true,
+          queuedMessageCount: 0
+        }
+      })
+      runtimeListener?.({
+        type: 'omp-event-batch',
+        events: [
+          { type: 'agent_start' },
+          {
+            type: 'message_end',
+            message: {
+              id: 'new-assistant',
+              role: 'assistant',
+              content: [{ type: 'text', text: '正在处理新会话' }],
+              stopReason: 'stop'
+            }
+          }
+        ]
+      })
+    })
+
+    expect(screen.getByText('检查新会话')).toBeInTheDocument()
+    expect(screen.getByText('正在处理新会话')).toBeInTheDocument()
+    await act(async () => {
+      finishCreate?.({
+        ok: true,
+        data: {
+          snapshot: {
+            status: 'ready',
+            workspacePath: '/tmp/workspace',
+            sessionId: 'new-session',
+            isStreaming: true,
+            queuedMessageCount: 0
+          }
+        }
+      })
+    })
+
+    expect(screen.getByText('检查新会话')).toBeInTheDocument()
+    expect(screen.getByText('正在处理新会话')).toBeInTheDocument()
+    expect(screen.queryByText('Session 不存在')).not.toBeInTheDocument()
+    await waitFor(() =>
+      expect(window.desktop.listSessions).toHaveBeenCalledTimes(2)
+    )
   })
 })
