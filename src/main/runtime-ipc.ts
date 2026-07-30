@@ -1942,6 +1942,12 @@ export function registerRuntimeIpc(
             'OMP 未返回新 Session ID',
             true
           )
+        await supervisor
+          .setSessionName(title || '图片会话')
+          .catch((error: unknown) =>
+            log.warn('自动设置 Session 标题失败', error)
+          )
+        await supervisor.prompt(input)
         let approvalModeSaved = true
         try {
           await stateStore.updateSessionPreference(
@@ -1954,21 +1960,22 @@ export function registerRuntimeIpc(
           approvalModeSaved = false
           supervisor.setApprovalState(approvalMode, false, false)
         }
-        await supervisor
-          .setSessionName(title || '图片会话')
-          .catch((error: unknown) =>
-            log.warn('自动设置 Session 标题失败', error)
-          )
-        const { session } = await requireSession(
-          workspace.id,
-          snapshot.sessionId
-        )
-        await supervisor.prompt(input)
+        const session = await requireSession(workspace.id, snapshot.sessionId)
+          .then((result) => result.session)
+          .catch((error: unknown) => {
+            log.info('Session 文件尚未可读，等待列表异步刷新', {
+              sessionId: snapshot.sessionId,
+              error: runtimeError(error)
+            })
+            return undefined
+          })
         return success({
           snapshot: approvalModeSaved
             ? supervisor.snapshot
             : supervisor.setApprovalState(approvalMode, false, false),
-          session: stateStore.applyPreferences(workspace.id, session)
+          ...(session
+            ? { session: stateStore.applyPreferences(workspace.id, session) }
+            : {})
         })
       } catch (error) {
         return failure(error)

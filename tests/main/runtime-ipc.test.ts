@@ -635,6 +635,122 @@ describe('registerRuntimeIpc', () => {
     cleanup()
   })
 
+  it('Prompt 已接收但 Session 文件尚未可读时仍成功并持久化 ID', async () => {
+    const { registerRuntimeIpc } = await import('../../src/main/runtime-ipc')
+    const harness = createHarness()
+    const workspace = {
+      id: 'workspace-new-session',
+      path: '/tmp',
+      addedAt: '2026-07-30T00:00:00.000Z',
+      lastUsedAt: '2026-07-30T00:00:00.000Z',
+      pinned: false
+    }
+    const session = {
+      id: 'new-session',
+      workspaceId: workspace.id,
+      path: '/tmp/new-session.jsonl',
+      title: '首条消息',
+      createdAt: '2026-07-30T00:00:00.000Z',
+      modifiedAt: '2026-07-30T00:00:00.000Z',
+      messageCount: 1,
+      size: 100,
+      compatibility: 'v3' as const,
+      status: 'pending' as const,
+      searchableText: '首条消息',
+      visibleTurns: [{ role: 'user' as const, text: '首条消息' }],
+      header: {
+        type: 'session' as const,
+        version: 3,
+        id: 'new-session',
+        timestamp: '2026-07-30T00:00:00.000Z',
+        cwd: workspace.path
+      }
+    }
+    const updateSessionPreference = vi.fn().mockResolvedValue(undefined)
+    const setActiveSession = vi.fn().mockResolvedValue(undefined)
+    const stateStore = {
+      state: {
+        version: 1,
+        activeWorkspaceId: workspace.id,
+        workspaces: [workspace],
+        sessionPreferences: {},
+        ui: {}
+      },
+      requireWorkspace: vi.fn().mockReturnValue(workspace),
+      runtimeNetworkConfig: vi.fn().mockReturnValue({ mode: 'auto' }),
+      updateSessionPreference,
+      setActiveSession,
+      applyPreferences: vi.fn((_workspaceId, value) => ({
+        ...value,
+        pinned: false,
+        archived: false
+      }))
+    } as unknown as DesktopStateStore
+    Object.assign(harness.supervisor.snapshot, {
+      workspacePath: workspace.path,
+      approvalMode: 'yolo'
+    })
+    Object.assign(harness.supervisor, {
+      newSession: vi.fn(async () => {
+        Object.assign(harness.supervisor.snapshot, { sessionId: session.id })
+        return harness.supervisor.snapshot
+      }),
+      setSessionName: vi.fn().mockResolvedValue(undefined),
+      prompt: vi.fn(async () => {
+        expect(updateSessionPreference).not.toHaveBeenCalled()
+        expect(setActiveSession).not.toHaveBeenCalled()
+      }),
+      setApprovalState: vi.fn(() => harness.supervisor.snapshot),
+      restart: vi.fn()
+    })
+    sessionCatalog.listWorkspaceSessions.mockResolvedValue([])
+    const cleanup = registerRuntimeIpc(
+      harness.supervisor as unknown as RuntimeSupervisor,
+      stateStore,
+      harness.getWindow
+    )
+
+    const result = await electron.handlers.get(IPC_CHANNELS.createSession)?.(
+      harness.event,
+      { message: '首条消息' },
+      '首条消息',
+      'yolo'
+    )
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        snapshot: { sessionId: session.id, isStreaming: false }
+      }
+    })
+    expect(result).not.toHaveProperty('data.session')
+    expect(harness.supervisor.prompt).toHaveBeenCalledWith({
+      message: '首条消息'
+    })
+    expect(updateSessionPreference).toHaveBeenCalledWith(
+      workspace.id,
+      session.id,
+      { approvalMode: 'yolo' }
+    )
+    expect(setActiveSession).toHaveBeenCalledWith(workspace.id, session.id)
+
+    updateSessionPreference.mockClear()
+    setActiveSession.mockClear()
+    harness.supervisor.prompt.mockRejectedValueOnce(
+      new Error('prompt rejected before commit')
+    )
+    const failed = await electron.handlers.get(IPC_CHANNELS.createSession)?.(
+      harness.event,
+      { message: '失败消息' },
+      '失败消息',
+      'yolo'
+    )
+    expect(failed).toMatchObject({ ok: false })
+    expect(updateSessionPreference).not.toHaveBeenCalled()
+    expect(setActiveSession).not.toHaveBeenCalled()
+    cleanup()
+  })
+
   it('v17.0.6 工具审批只向 Renderer 投影摘要并按截止时间自动允许', async () => {
     vi.useFakeTimers()
     try {
@@ -815,6 +931,7 @@ type HarnessSupervisor = EventEmitter & {
   recordDiagnostic: ReturnType<typeof vi.fn>
   sendFrame: ReturnType<typeof vi.fn>
   loginProvider: ReturnType<typeof vi.fn>
+  prompt: ReturnType<typeof vi.fn>
   start: ReturnType<typeof vi.fn>
   stopCurrentRun: ReturnType<typeof vi.fn>
   switchSession: ReturnType<typeof vi.fn>
@@ -843,6 +960,7 @@ function createHarness(): {
     recordDiagnostic: vi.fn(),
     sendFrame: vi.fn(),
     loginProvider: vi.fn(),
+    prompt: vi.fn(),
     start: vi.fn(),
     stopCurrentRun: vi.fn(),
     switchSession: vi.fn(),
