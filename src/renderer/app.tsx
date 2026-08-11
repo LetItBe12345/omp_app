@@ -850,6 +850,7 @@ function Conversation({
       }}
       projection={projection}
       setProjection={setProjection}
+      workspacePath={runtime.workspacePath}
     >
       {conversation}
     </ConversationRuntime>

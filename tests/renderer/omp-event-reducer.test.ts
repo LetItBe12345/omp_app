@@ -306,7 +306,7 @@ describe('OmpEventReducer', () => {
     expect(shouldCollapseTurn(turn)).toBe(false)
   })
 
-  it('摘要耗时扣除 Interaction 等待时间', () => {
+  it('摘要耗时使用 Agent Turn 的完整起止时间', () => {
     const projection = run([
       { type: 'agent_start' },
       {
@@ -328,7 +328,7 @@ describe('OmpEventReducer', () => {
       { type: 'agent_end' }
     ])
     const turn = assistantTurn(projection)
-    expect(turnElapsedMs(turn)).toBe(300)
+    expect(turnElapsedMs(turn)).toBe(400)
   })
 
   it('历史按可见用户消息分 Turn，隐藏用户消息不切断 Turn', () => {

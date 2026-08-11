@@ -88,7 +88,7 @@ agent_start / agent_end
 
 Renderer 只做事件归并和展示，不重建 Agent 状态机。
 
-Tool Call、Progress 和 Result 使用 `toolCallId` 更新同一个 Action。连续的 Read、Grep、Glob、List 和 Web Search 等上下文操作可以聚合显示；聚合只影响展示，展开后必须恢复原始工具顺序。
+Tool Call、Progress 和 Result 使用 `toolCallId` 更新同一个 Action。Read、Grep、Glob、List 和 Web Search 等上下文操作不再建立二级聚合；Process 展开后按原始顺序逐条紧凑显示。
 
 ## 4. Thinking 和工具调用的交互
 

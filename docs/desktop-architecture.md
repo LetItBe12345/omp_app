@@ -245,7 +245,7 @@ Renderer 将 OMP 实时事件和 Session 历史转换为同一种有序展示投
 - `Artifact`：高价值工具结果的引用或摘要。
 - `Lifecycle`：运行状态和控制信号，不属于聊天内容。
 
-该投影必须保持薄层。它不持久化第二份 Session 历史，不调度工具，也不推断 OMP 未提供的 Agent 状态。Context Action 聚合只影响展示，展开时仍恢复原始操作顺序。
+该投影必须保持薄层。它不持久化第二份 Session 历史，不调度工具，也不推断 OMP 未提供的 Agent 状态。Process 只提供 Turn 级一级展开；展开后，各类 Action 按原始顺序逐条显示。
 
 ### Renderer 持有
 
