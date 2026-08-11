@@ -17,6 +17,7 @@ export type NarrativeItem = {
   text: string
   messageId: string
   blockIndex: number
+  redacted?: boolean
 }
 
 export type ActionCategory =
@@ -366,7 +367,8 @@ function itemsFromMessage(
           narrative: 'reasoning',
           text: '思考内容不可用',
           messageId: messageIdValue,
-          blockIndex
+          blockIndex,
+          redacted: true
         }
       ]
     }
@@ -986,11 +988,7 @@ export function turnElapsedMs(
 ): number | undefined {
   if (turn.startedAt === undefined) return undefined
   const end = turn.endedAt ?? now
-  const activeWait =
-    turn.waitingStartedAt === undefined
-      ? 0
-      : Math.max(0, now - turn.waitingStartedAt)
-  return Math.max(0, end - turn.startedAt - turn.waitingDurationMs - activeWait)
+  return Math.max(0, end - turn.startedAt)
 }
 
 export function shouldCollapseTurn(turn: AssistantTurn): boolean {

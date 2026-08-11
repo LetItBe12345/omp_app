@@ -2,25 +2,40 @@ import {
   AssistantRuntimeProvider,
   MessagePartPrimitive,
   MessagePrimitive,
+  TextMessagePartProvider,
   ThreadPrimitive,
   useAuiState,
   useExternalStoreRuntime,
   useThreadViewport,
   type AppendMessage,
-  type PartState,
   type ThreadMessageLike
 } from '@assistant-ui/react'
 import { MarkdownTextPrimitive } from '@assistant-ui/react-markdown'
 import {
   ArrowDown,
+  Bot,
   Check,
   ChevronDown,
   ChevronRight,
   CircleAlert,
+  CircleEllipsis,
+  CircleHelp,
   CircleStop,
+  Clock3,
   Copy,
+  FileDiff,
+  FilePenLine,
+  FilePlus2,
+  FileSearch,
+  FileText,
+  Folder,
+  Globe,
   LoaderCircle,
-  Wrench
+  Search,
+  SquareTerminal,
+  Trash2,
+  Wrench,
+  type LucideIcon
 } from 'lucide-react'
 import {
   createContext,
@@ -43,17 +58,18 @@ import {
   setTurnCollapsed,
   shouldCollapseTurn,
   turnElapsedMs,
-  turnStatusText,
   type ActionItem,
   type AssistantTurn,
   type ArtifactItem,
   type ConversationProjection,
-  type InteractionItem
+  type InteractionItem,
+  type NarrativeItem
 } from './omp-event-reducer'
 
 type ConversationContextValue = {
   projection: ConversationProjection
   setProjection: React.Dispatch<React.SetStateAction<ConversationProjection>>
+  workspacePath?: string
 }
 
 const ConversationContext = createContext<ConversationContextValue | null>(null)
@@ -215,11 +231,20 @@ function CopyActionButton({
 }
 
 function statusIcon(action: ActionItem): ReactNode {
-  if (action.state === 'running' || action.state === 'pending') {
+  if (action.state === 'pending') {
+    return (
+      <Clock3
+        aria-label="等待执行"
+        className="text-[var(--text-muted)]"
+        size={14}
+      />
+    )
+  }
+  if (action.state === 'running') {
     return (
       <LoaderCircle
-        aria-label="进行中"
-        className="animate-spin text-[var(--text-muted)]"
+        aria-label="运行中"
+        className="tool-spinner animate-spin text-[var(--text-muted)]"
         size={14}
       />
     )
@@ -231,15 +256,153 @@ function statusIcon(action: ActionItem): ReactNode {
     return <CircleAlert aria-label="失败" className="text-red-600" size={14} />
   }
   if (action.state === 'aborted' || action.state === 'rejected') {
-    return <CircleStop aria-label={action.state} size={14} />
+    return (
+      <CircleStop
+        aria-label={action.state === 'aborted' ? '已中止' : '已拒绝'}
+        className="text-[var(--text-muted)]"
+        size={14}
+      />
+    )
   }
   return (
-    <CircleAlert
-      aria-label="未完整结束"
+    <CircleEllipsis
+      aria-label="状态未知"
       className="text-[var(--text-muted)]"
       size={14}
     />
   )
+}
+
+function argumentText(
+  action: ActionItem,
+  keys: readonly string[]
+): string | undefined {
+  for (const key of keys) {
+    const value = action.args?.[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return undefined
+}
+
+function shortenPath(value: string, workspacePath?: string): string {
+  const normalized = value.replaceAll('\\', '/').replace(/\/+$/u, '')
+  const workspace = workspacePath?.replaceAll('\\', '/').replace(/\/+$/u, '')
+  if (workspace && normalized.startsWith(`${workspace}/`)) {
+    return normalized.slice(workspace.length + 1)
+  }
+  if (!/^(?:[a-z]:\/|\/)/iu.test(normalized)) return normalized
+  const parts = normalized.split('/').filter(Boolean)
+  return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : normalized
+}
+
+function cleanInlineSummary(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  const paragraph = value
+    .split(/\n\s*\n/u)
+    .find((part) => part.trim().length > 0)
+  if (!paragraph) return undefined
+  const cleaned = paragraph
+    .replace(/^\s{0,3}#{1,6}\s+/gmu, '')
+    .replace(/^\s*(?:[-*+] |\d+[.)] )/gmu, '')
+    .replace(/!\[([^\]]*)\]\([^)]*\)/gu, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/gu, '$1')
+    .replace(/[*_~`>#]/gu, '')
+    .replace(/\s+/gu, ' ')
+    .trim()
+  if (!cleaned) return undefined
+  return cleaned.length > 160 ? `${cleaned.slice(0, 159)}…` : cleaned
+}
+
+type ToolPresentation = {
+  Icon: LucideIcon
+  label: string
+  detail?: string
+  detailTitle?: string
+}
+
+function actionPresentation(
+  action: ActionItem,
+  workspacePath?: string
+): ToolPresentation {
+  const name = action.toolName.toLowerCase()
+  const path = argumentText(action, ['path', 'filePath', 'directory'])
+  const pathDetail = path ? shortenPath(path, workspacePath) : undefined
+  if (name === 'read')
+    return {
+      Icon: FileText,
+      label: '读取',
+      detail: pathDetail,
+      detailTitle: path
+    }
+  if (name === 'grep')
+    return {
+      Icon: Search,
+      label: '搜索',
+      detail: argumentText(action, ['pattern', 'query'])
+    }
+  if (name === 'glob')
+    return {
+      Icon: FileSearch,
+      label: '匹配文件',
+      detail: argumentText(action, ['pattern', 'query'])
+    }
+  if (name === 'find')
+    return {
+      Icon: Search,
+      label: '查找',
+      detail: argumentText(action, ['query', 'pattern']) ?? pathDetail,
+      detailTitle: path
+    }
+  if (name === 'ls')
+    return {
+      Icon: Folder,
+      label: '浏览目录',
+      detail: pathDetail,
+      detailTitle: path
+    }
+  if (name === 'web_search')
+    return {
+      Icon: Globe,
+      label: '搜索网页',
+      detail: argumentText(action, ['query'])
+    }
+  if (name === 'fetch')
+    return {
+      Icon: Globe,
+      label: '获取网页',
+      detail: argumentText(action, ['url', 'target']) ?? pathDetail,
+      detailTitle: path
+    }
+  if (['bash', 'shell', 'exec', 'command'].includes(name)) {
+    const command = argumentText(action, ['command', 'cmd'])
+    return {
+      Icon: SquareTerminal,
+      label: '运行',
+      detail: command?.split(/\r?\n/u)[0],
+      detailTitle: command
+    }
+  }
+  const editTools: Record<string, { Icon: LucideIcon; label: string }> = {
+    edit: { Icon: FilePenLine, label: '修改' },
+    write: { Icon: FilePenLine, label: '写入' },
+    apply_patch: { Icon: FileDiff, label: '应用修改' },
+    create_file: { Icon: FilePlus2, label: '创建' },
+    delete_file: { Icon: Trash2, label: '删除' }
+  }
+  const edit = editTools[name]
+  if (edit) return { ...edit, detail: pathDetail, detailTitle: path }
+  if (action.category === 'subagent') {
+    const tasks = action.args?.['tasks']
+    const detail = Array.isArray(tasks)
+      ? `${tasks.length} 个任务`
+      : argumentText(action, ['name', 'task'])
+    return { Icon: Bot, label: '子任务', detail }
+  }
+  return {
+    Icon: Wrench,
+    label: action.toolName,
+    detail: actionSummary(action)
+  }
 }
 
 function findToolResult(messages: unknown, toolCallId: string): unknown {
@@ -259,15 +422,14 @@ function findToolResult(messages: unknown, toolCallId: string): unknown {
   return undefined
 }
 
-function ToolRow({
-  action,
-  compact = false
-}: {
-  action: ActionItem
-  compact?: boolean
-}): React.JSX.Element {
+function ToolRow({ action }: { action: ActionItem }): React.JSX.Element {
   const [copied, setCopied] = useState(false)
-  const summary = actionSummary(action)
+  const { workspacePath } = useConversationContext()
+  const presentation = actionPresentation(action, workspacePath)
+  const resultSummary =
+    action.category === 'subagent' && action.state === 'success'
+      ? cleanInlineSummary(action.resultSummary)
+      : undefined
   const copyResult = async (): Promise<void> => {
     const result = await window.desktop.getMessages()
     if (!result.ok) return
@@ -281,15 +443,24 @@ function ToolRow({
   }
   return (
     <div
-      className={`tool-row ${compact ? 'tool-row-compact' : ''}`}
+      className={`tool-row ${action.state === 'error' ? 'tool-row-error' : ''} ${
+        action.category === 'subagent' ? 'tool-row-subagent' : ''
+      }`}
       data-tool-call-id={action.toolCallId}
+      title={`原始工具：${action.toolName}`}
     >
-      <span className="tool-state">{statusIcon(action)}</span>
-      <span className="tool-name">{action.toolName}</span>
-      {summary && <span className="tool-summary">{summary}</span>}
-      <span className="tool-status">
-        {action.error ?? (action.state === 'incomplete' ? '未完整结束' : '')}
+      <span className="tool-kind" title={action.toolName}>
+        <presentation.Icon aria-hidden size={14} strokeWidth={1.75} />
       </span>
+      <span className="tool-name">{presentation.label}</span>
+      <span
+        aria-label={presentation.detailTitle}
+        className="tool-summary"
+        title={presentation.detailTitle}
+      >
+        {presentation.detail}
+      </span>
+      <span className="tool-state">{statusIcon(action)}</span>
       {action.ended && (
         <button
           aria-label={`复制 ${action.toolName} 完整结果`}
@@ -300,6 +471,16 @@ function ToolRow({
         >
           {copied ? <Check size={13} /> : <Copy size={13} />}
         </button>
+      )}
+      {resultSummary && (
+        <span className="tool-result-summary" title={action.resultSummary}>
+          {resultSummary}
+        </span>
+      )}
+      {action.error && (
+        <span className="tool-error-summary" title={action.error}>
+          {action.error}
+        </span>
       )}
     </div>
   )
@@ -355,117 +536,6 @@ function ActionWithInteraction({
         <Interaction interaction={interaction} key={interaction.id} />
       ))}
     </div>
-  )
-}
-
-function contextSummary(
-  turn: AssistantTurn,
-  indices: readonly number[]
-): string {
-  const actions = indices.flatMap((index): ActionItem[] => {
-    const item = turn.items[index]
-    return item?.kind === 'action' ? [item] : []
-  })
-  const paths = new Set<string>()
-  let searches = 0
-  for (const action of actions) {
-    const path =
-      action.args?.['path'] ??
-      action.args?.['filePath'] ??
-      action.args?.['directory']
-    if (typeof path === 'string' && path.trim()) {
-      paths.add(path.replaceAll('\\', '/').replace(/\/+$/u, ''))
-    }
-    if (
-      ['grep', 'glob', 'find', 'web_search'].includes(
-        action.toolName.toLowerCase()
-      )
-    ) {
-      searches += 1
-    }
-  }
-  const parts = [
-    paths.size ? `读取 ${paths.size} 个文件` : undefined,
-    searches ? `搜索 ${searches} 次` : undefined
-  ].filter(Boolean)
-  return parts.length > 0
-    ? parts.join(' · ')
-    : `执行了 ${actions.length} 次上下文操作`
-}
-
-function LiveProcessItems({
-  turn
-}: {
-  turn: AssistantTurn
-}): React.JSX.Element {
-  const nodes: Array<
-    | { kind: 'context'; actions: ActionItem[] }
-    | { kind: 'item'; item: AssistantTurn['items'][number] }
-  > = []
-  for (const item of turn.items) {
-    if (item.kind === 'narrative' && item.narrative === 'final') continue
-    const groupable =
-      item.kind === 'action' &&
-      item.category === 'context' &&
-      !['error', 'rejected', 'aborted'].includes(item.state)
-    const previous = nodes.at(-1)
-    if (groupable && previous?.kind === 'context') {
-      previous.actions.push(item)
-    } else if (groupable) {
-      nodes.push({ kind: 'context', actions: [item] })
-    } else {
-      nodes.push({ kind: 'item', item })
-    }
-  }
-  return (
-    <>
-      {nodes.map((node) => {
-        if (node.kind === 'context') {
-          const indices = node.actions.map((action) =>
-            turn.items.findIndex((item) => item.id === action.id)
-          )
-          return (
-            <div
-              className="context-group"
-              key={`context-${node.actions[0]?.id}`}
-            >
-              <div className="context-heading">
-                <Wrench size={13} />
-                {contextSummary(turn, indices)}
-              </div>
-              {node.actions.map((action) => (
-                <ActionWithInteraction
-                  action={action}
-                  key={action.id}
-                  turn={turn}
-                />
-              ))}
-            </div>
-          )
-        }
-        const item = node.item
-        if (item.kind === 'narrative') {
-          return (
-            <div className="process-narrative" key={item.id}>
-              {item.text}
-            </div>
-          )
-        }
-        if (item.kind === 'action') {
-          return (
-            <ActionWithInteraction action={item} key={item.id} turn={turn} />
-          )
-        }
-        if (item.kind === 'interaction' && !item.actionId) {
-          return <Interaction interaction={item} key={item.id} />
-        }
-        return null
-      })}
-      <div className="process-indicator">
-        <LoaderCircle className="animate-spin" size={13} />
-        正在处理
-      </div>
-    </>
   )
 }
 
@@ -744,144 +814,120 @@ const markdownComponents = {
   )
 }
 
-function ProcessContents({
+function answerCandidateItems(turn: AssistantTurn): NarrativeItem[] {
+  const items: NarrativeItem[] = []
+  for (let index = turn.items.length - 1; index >= 0; index -= 1) {
+    const item = turn.items[index]
+    if (!item) continue
+    if (item.kind === 'narrative' && item.redacted) continue
+    if (
+      item.kind === 'narrative' &&
+      item.narrative === 'intermediate' &&
+      !item.text.trim()
+    ) {
+      continue
+    }
+    if (item.kind === 'narrative' && item.narrative === 'intermediate') {
+      items.unshift(item)
+      continue
+    }
+    break
+  }
+  return items
+}
+
+function processItems(
+  turn: AssistantTurn,
+  candidateIds: ReadonlySet<string> = new Set()
+): AssistantTurn['items'] {
+  return turn.items.filter((item) => {
+    if (item.kind === 'artifact') return false
+    if (item.kind !== 'narrative') return true
+    return (
+      item.narrative !== 'final' &&
+      !item.redacted &&
+      (item.narrative === 'reasoning' || item.text.trim().length > 0) &&
+      !candidateIds.has(item.id)
+    )
+  })
+}
+
+function NarrativeMarkdown({
+  item,
+  candidate = false
+}: {
+  item: NarrativeItem
+  candidate?: boolean
+}): React.JSX.Element {
+  return (
+    <TextMessagePartProvider text={item.text} isRunning={candidate}>
+      <div
+        className={
+          candidate
+            ? 'assistant-answer-candidate prose max-w-none'
+            : 'process-narrative-markdown'
+        }
+      >
+        <MarkdownTextPrimitive
+          components={markdownComponents}
+          defer={candidate}
+          skipHtml
+          smooth={false}
+        />
+      </div>
+    </TextMessagePartProvider>
+  )
+}
+
+function ProcessItems({
   turn,
-  expanded
+  candidateIds
 }: {
   turn: AssistantTurn
-  expanded: boolean
+  candidateIds?: ReadonlySet<string>
 }): React.JSX.Element {
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const [following, setFollowing] = useState(true)
-  const running =
-    turn.status === 'running' ||
-    turn.status === 'retrying' ||
-    turn.status === 'waiting'
+  return (
+    <>
+      {processItems(turn, candidateIds).map((item) => {
+        if (item.kind === 'narrative') {
+          return item.narrative === 'reasoning' ? (
+            <div className="thinking-narrative" key={item.id}>
+              {item.text}
+            </div>
+          ) : (
+            <NarrativeMarkdown item={item} key={item.id} />
+          )
+        }
+        if (item.kind === 'action') {
+          return (
+            <ActionWithInteraction action={item} key={item.id} turn={turn} />
+          )
+        }
+        if (item.kind === 'interaction' && !item.actionId) {
+          return <Interaction interaction={item} key={item.id} />
+        }
+        return null
+      })}
+    </>
+  )
+}
 
-  useEffect(() => {
-    if (!expanded) return
-    const element = scrollRef.current
-    if (!element) return
-    if (running) {
-      element.scrollTop = element.scrollHeight
-    } else {
-      element.scrollTop = 0
-    }
-    window.requestAnimationFrame(() => setFollowing(running))
-  }, [expanded, running])
-
-  useEffect(() => {
-    const element = scrollRef.current
-    if (expanded && running && following && element) {
-      element.scrollTop = element.scrollHeight
-    }
-  }, [expanded, following, running, turn.items])
-
+function ProcessContents({
+  turn,
+  candidateIds
+}: {
+  turn: AssistantTurn
+  candidateIds?: ReadonlySet<string>
+}): React.JSX.Element {
   return (
     <div className="process-shell">
       <div
         aria-label="完整执行过程"
         className="process-content"
         id={`process-${turn.id}`}
-        onScroll={(event) => {
-          const element = event.currentTarget
-          setFollowing(
-            element.scrollHeight - element.scrollTop - element.clientHeight < 32
-          )
-        }}
-        ref={scrollRef}
       >
-        {running ? (
-          <LiveProcessItems turn={turn} />
-        ) : (
-          <MessagePrimitive.GroupedParts
-            groupBy={(part: PartState) => {
-              if (part.type === 'text') return []
-              if (
-                part.type === 'tool-call' &&
-                [
-                  'read',
-                  'grep',
-                  'glob',
-                  'find',
-                  'ls',
-                  'web_search',
-                  'fetch'
-                ].includes(part.toolName.toLowerCase()) &&
-                !part.isError
-              ) {
-                return ['group-process', 'group-context'] as const
-              }
-              return ['group-process'] as const
-            }}
-            indicator="always"
-          >
-            {({ part, children }) => {
-              if (part.type === 'group-process') return <>{children}</>
-              if (part.type === 'group-context') {
-                return (
-                  <div className="context-group">
-                    <div className="context-heading">
-                      <Wrench size={13} />
-                      {contextSummary(turn, part.indices)}
-                    </div>
-                    {children}
-                  </div>
-                )
-              }
-              if (part.type === 'reasoning') {
-                return <div className="process-narrative">{part.text}</div>
-              }
-              if (part.type === 'tool-call') {
-                const action = turn.items.find(
-                  (item): item is ActionItem =>
-                    item.kind === 'action' &&
-                    item.toolCallId === part.toolCallId
-                )
-                return action ? (
-                  <ActionWithInteraction action={action} turn={turn} />
-                ) : null
-              }
-              if (part.type === 'data') {
-                if (
-                  part.name === 'omp-interaction' &&
-                  part.data &&
-                  typeof part.data === 'object'
-                ) {
-                  const interaction = part.data as InteractionItem
-                  return interaction.actionId ? null : (
-                    <Interaction interaction={interaction} />
-                  )
-                }
-                return null
-              }
-              if (part.type === 'indicator') {
-                return running ? (
-                  <div className="process-indicator">
-                    <LoaderCircle className="animate-spin" size={13} />
-                    正在处理
-                  </div>
-                ) : null
-              }
-              return null
-            }}
-          </MessagePrimitive.GroupedParts>
-        )}
+        <ProcessItems candidateIds={candidateIds} turn={turn} />
       </div>
-      {!following && running && (
-        <button
-          aria-label="回到过程底部"
-          className="process-scroll-bottom"
-          onClick={() => {
-            const element = scrollRef.current
-            if (element) element.scrollTop = element.scrollHeight
-            setFollowing(true)
-          }}
-          type="button"
-        >
-          <ArrowDown size={15} />
-        </button>
-      )}
     </div>
   )
 }
@@ -890,7 +936,43 @@ function formatElapsed(turn: AssistantTurn, now: number): string | undefined {
   const elapsed = turnElapsedMs(turn, now)
   if (elapsed === undefined) return undefined
   if (elapsed < 1_000) return '少于 1 秒'
-  return `${Math.floor(elapsed / 1_000)} 秒`
+  const seconds = Math.floor(elapsed / 1_000)
+  if (seconds < 60) return `${seconds}秒`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}分${seconds % 60}秒`
+  return `${Math.floor(minutes / 60)}小时${minutes % 60}分`
+}
+
+function processStatusIcon(turn: AssistantTurn): React.JSX.Element {
+  if (turn.status === 'running' || turn.status === 'retrying') {
+    return (
+      <LoaderCircle
+        aria-label="运行中"
+        className="process-spinner animate-spin"
+        size={14}
+      />
+    )
+  }
+  if (turn.status === 'waiting') {
+    return <CircleHelp aria-label="等待操作" size={14} />
+  }
+  if (turn.status === 'completed' || turn.status === 'completed-incomplete') {
+    return <Check aria-label="已完成" className="text-emerald-600" size={14} />
+  }
+  if (turn.status === 'error' || turn.status === 'length') {
+    return <CircleAlert aria-label="失败" className="text-red-600" size={14} />
+  }
+  return <CircleStop aria-label="已中止" size={14} />
+}
+
+function processStatusLabel(turn: AssistantTurn): string {
+  if (turn.status === 'running' || turn.status === 'retrying') return '运行中'
+  if (turn.status === 'waiting') return '等待操作'
+  if (turn.status === 'completed' || turn.status === 'completed-incomplete') {
+    return '已完成'
+  }
+  if (turn.status === 'error' || turn.status === 'length') return '失败'
+  return '已中止'
 }
 
 function ProcessSummary({
@@ -926,32 +1008,44 @@ function ProcessSummary({
   const approvalDeadline = Math.min(
     ...pendingApprovals.map((request) => request.deadline)
   )
-  const label =
+  const unresolvedInteraction = turn.items.find(
+    (item): item is InteractionItem =>
+      item.kind === 'interaction' && !item.resolved && !item.timedOut
+  )
+  const waitingLabel =
     pendingApprovals.length > 0
-      ? `等待操作 · ${Math.max(
+      ? `等待确认 · ${Math.max(
           0,
           Math.ceil((approvalDeadline - now) / 1_000)
-        )} 秒后自动允许`
-      : [
-          elapsed
-            ? running
-              ? `思考中 ${elapsed}`
-              : `思考了 ${elapsed}`
-            : undefined,
-          toolCount ? `${toolCount} 个工具` : undefined,
-          turnStatusText(turn.status)
-        ]
-          .filter(Boolean)
-          .join(' · ')
+        )}秒`
+      : unresolvedInteraction
+        ? unresolvedInteraction.deadline
+          ? `等待操作 · ${Math.max(
+              0,
+              Math.ceil((unresolvedInteraction.deadline - now) / 1_000)
+            )}秒`
+          : '等待操作'
+        : turn.status === 'waiting'
+          ? '等待操作'
+          : undefined
+  const label =
+    waitingLabel ??
+    [toolCount ? `${toolCount} 次工具调用` : undefined, elapsed]
+      .filter(Boolean)
+      .join(' · ')
   return (
     <button
       aria-controls={`process-${turn.id}`}
       aria-expanded={expanded}
+      aria-label={`${processStatusLabel(turn)}${label ? ` · ${label}` : ''}`}
       className="process-summary"
       onClick={onToggle}
       type="button"
     >
-      <span>{label}</span>
+      <span className="process-summary-main">
+        {processStatusIcon(turn)}
+        <span className="process-summary-label">{label}</span>
+      </span>
       {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
     </button>
   )
@@ -984,11 +1078,7 @@ function AssistantMessage(): React.JSX.Element | null {
     (item): item is ArtifactItem =>
       item.kind === 'artifact' && item.artifact === 'command-result'
   )
-  const hasProcess = turn.items.some(
-    (item) =>
-      item.kind !== 'artifact' &&
-      (item.kind !== 'narrative' || item.narrative !== 'final')
-  )
+  const hasProcess = processItems(turn).length > 0
   const finalText = turn.finalItemIds
     .map((id) => turn.items.find((item) => item.id === id))
     .flatMap((item) =>
@@ -1017,13 +1107,11 @@ function AssistantMessage(): React.JSX.Element | null {
           <ProcessSummary expanded={expanded} onToggle={toggle} turn={turn} />
         </div>
       )}
-      {hasProcess && expanded && (
-        <ProcessContents expanded={expanded} turn={turn} />
-      )}
+      {hasProcess && expanded && <ProcessContents turn={turn} />}
       {commandResults.map((item) => (
         <CommandResultCard item={item} key={item.id} />
       ))}
-      <div className="assistant-final">
+      <div className="assistant-final prose max-w-none">
         <MessagePrimitive.Parts
           components={{
             Text: () => (
@@ -1031,6 +1119,7 @@ function AssistantMessage(): React.JSX.Element | null {
                 components={markdownComponents}
                 defer
                 skipHtml
+                smooth={false}
               />
             ),
             Reasoning: () => null,
@@ -1116,12 +1205,11 @@ function LiveAssistantTurn({
     (item): item is ArtifactItem =>
       item.kind === 'artifact' && item.artifact === 'command-result'
   )
-  const hasProcess = turn.items.some(
-    (item) =>
-      item.kind !== 'artifact' &&
-      (item.kind !== 'narrative' || item.narrative !== 'final')
-  )
-  if (!hasProcess && commandResults.length > 0) {
+  const candidates = answerCandidateItems(turn)
+  const candidateIds = new Set(candidates.map((item) => item.id))
+  const hasProcess = processItems(turn, candidateIds).length > 0
+  const hasSummary = hasProcess || toolApprovals.length > 0
+  if (!hasSummary && candidates.length === 0 && commandResults.length > 0) {
     return (
       <div
         className="assistant-message"
@@ -1140,22 +1228,32 @@ function LiveAssistantTurn({
       data-message-id={turn.id}
       data-role="assistant"
     >
-      <ProcessSummary
-        expanded={expanded}
-        onToggle={() =>
-          setProjection((current) =>
-            setTurnCollapsed(current, turn.id, expanded)
-          )
-        }
-        turn={turn}
-        toolApprovals={toolApprovals}
-      />
-      {expanded && (
+      {hasSummary && (
+        <ProcessSummary
+          expanded={expanded}
+          onToggle={() =>
+            setProjection((current) =>
+              setTurnCollapsed(current, turn.id, expanded)
+            )
+          }
+          turn={turn}
+          toolApprovals={toolApprovals}
+        />
+      )}
+      {hasSummary && expanded && (
         <>
-          <ProcessContents expanded turn={turn} />
+          {hasProcess && (
+            <ProcessContents candidateIds={candidateIds} turn={turn} />
+          )}
           <ToolApprovalPanel requests={toolApprovals} />
         </>
       )}
+      {commandResults.map((item) => (
+        <CommandResultCard item={item} key={item.id} />
+      ))}
+      {candidates.map((item) => (
+        <NarrativeMarkdown candidate item={item} key={item.id} />
+      ))}
     </div>
   )
 }
@@ -1304,6 +1402,7 @@ export function ConversationRuntime({
   projection,
   setProjection,
   isRunning,
+  workspacePath,
   onSend,
   onCancel,
   children
@@ -1311,6 +1410,7 @@ export function ConversationRuntime({
   projection: ConversationProjection
   setProjection: React.Dispatch<React.SetStateAction<ConversationProjection>>
   isRunning: boolean
+  workspacePath?: string
   onSend: (message: string) => Promise<void>
   onCancel: () => Promise<void>
   children: ReactNode
@@ -1348,7 +1448,9 @@ export function ConversationRuntime({
   })
   const messageKey = messages.map((message) => message.id).join('\n')
   return (
-    <ConversationContext.Provider value={{ projection, setProjection }}>
+    <ConversationContext.Provider
+      value={{ projection, setProjection, workspacePath }}
+    >
       <SettledTurnsContext.Provider value={settledContext}>
         <AssistantRuntimeProvider key={messageKey} runtime={runtime}>
           {children}

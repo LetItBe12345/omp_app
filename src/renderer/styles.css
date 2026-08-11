@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@plugin '@tailwindcss/typography';
 
 :root {
   color-scheme: light;
@@ -91,8 +92,12 @@ body {
   contain-intrinsic-size: auto 5rem;
 }
 
-.assistant-final {
+.assistant-final,
+.assistant-answer-candidate {
   margin-top: 0.85rem;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  line-height: 1.75;
 }
 
 .assistant-copy-row {
@@ -101,27 +106,33 @@ body {
   margin-top: 0.45rem;
 }
 
-.assistant-final:empty {
+.assistant-final:empty,
+.assistant-answer-candidate:empty {
   display: none;
 }
 
-.assistant-final p {
+.assistant-final p,
+.assistant-answer-candidate p {
   margin: 0.55rem 0;
 }
 
 .assistant-final ul,
-.assistant-final ol {
+.assistant-final ol,
+.assistant-answer-candidate ul,
+.assistant-answer-candidate ol {
   margin: 0.65rem 0;
   padding-left: 1.4rem;
 }
 
-.assistant-final a {
+.assistant-final a,
+.assistant-answer-candidate a {
   color: #3c5d91;
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
-.assistant-final pre {
+.assistant-final pre,
+.assistant-answer-candidate pre {
   overflow-x: auto;
   border: 1px solid var(--border-subtle);
   border-radius: 0.65rem;
@@ -129,12 +140,74 @@ body {
   padding: 0.75rem;
   font-size: 0.78rem;
   line-height: 1.6;
+  white-space: pre;
+}
+
+.assistant-final h1,
+.assistant-answer-candidate h1 {
+  font-size: 20px;
+  font-weight: 650;
+}
+
+.assistant-final h2,
+.assistant-answer-candidate h2 {
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.assistant-final h3,
+.assistant-answer-candidate h3 {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.assistant-final h4,
+.assistant-answer-candidate h4 {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.assistant-final h5,
+.assistant-answer-candidate h5 {
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.assistant-final h6,
+.assistant-answer-candidate h6 {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.assistant-final blockquote,
+.assistant-answer-candidate blockquote {
+  border-left: 2px solid var(--border);
+  font-style: normal;
+}
+
+.assistant-final :not(pre) > code,
+.assistant-answer-candidate :not(pre) > code {
+  border: 0;
+  border-radius: 0.3rem;
+  background: #f1f1ee;
+  padding: 0.1rem 0.25rem;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.assistant-final :not(pre) > code::before,
+.assistant-final :not(pre) > code::after,
+.assistant-answer-candidate :not(pre) > code::before,
+.assistant-answer-candidate :not(pre) > code::after {
+  content: none;
 }
 
 .process-summary {
   display: flex;
-  width: 100%;
-  min-height: 2.45rem;
+  width: min(100%, 32rem);
+  min-height: 2.25rem;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
@@ -148,13 +221,25 @@ body {
   text-align: left;
 }
 
+.process-summary-main {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.process-summary-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .process-summary:hover {
   border-color: var(--border);
   background: #f6f6f3;
 }
 
 .process-summary:focus-visible,
-.process-scroll-bottom:focus-visible,
 .thread-scroll-bottom:focus-visible,
 .tool-copy:focus-visible {
   outline: 2px solid #696963;
@@ -167,38 +252,40 @@ body {
 }
 
 .process-content {
-  max-height: min(60vh, 640px);
-  overflow-y: auto;
-  overscroll-behavior: auto;
   border-left: 1px solid var(--border-subtle);
   padding: 0.35rem 0 0.35rem 0.8rem;
   color: var(--text-secondary);
-  scrollbar-gutter: stable;
 }
 
-.process-narrative {
+.thinking-narrative {
   margin: 0.3rem 0;
-  color: var(--text-secondary);
-  font-size: 0.79rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
   line-height: 1.65;
   white-space: pre-wrap;
 }
 
-.process-indicator,
-.context-heading {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  color: var(--text-muted);
-  font-size: 0.75rem;
+.process-narrative-markdown {
+  margin: 0.3rem 0;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.6;
 }
 
-.context-group {
+.process-narrative-markdown :is(p, ul, ol, pre, blockquote) {
   margin: 0.35rem 0;
 }
 
-.context-heading {
-  margin-bottom: 0.2rem;
+.process-narrative-markdown :is(h1, h2, h3, h4, h5, h6) {
+  margin: 0.45rem 0 0.25rem;
+  color: var(--text-primary);
+  font-size: inherit;
+  font-weight: 600;
+}
+
+.process-narrative-markdown pre {
+  overflow-x: auto;
+  white-space: pre;
 }
 
 .tool-row {
@@ -211,6 +298,14 @@ body {
   color: var(--text-secondary);
   font-size: 0.76rem;
   line-height: 1.35;
+}
+
+.tool-row-subagent {
+  margin: 0.2rem 0;
+}
+
+.tool-row-subagent .tool-kind {
+  color: #53657d;
 }
 
 .tool-name {
@@ -238,10 +333,33 @@ body {
   place-items: center;
   border-radius: 0.35rem;
   color: var(--text-muted);
+  opacity: 0;
 }
 
-.tool-copy:hover {
+.tool-copy:hover,
+.tool-row:hover .tool-copy,
+.tool-row:focus-within .tool-copy,
+.tool-row-error .tool-copy {
   background: var(--surface-selected);
+  opacity: 1;
+}
+
+.tool-result-summary,
+.tool-error-summary {
+  grid-column: 2 / -1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-error-summary {
+  display: -webkit-box;
+  color: #b42318;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 
 .message-copy {
@@ -349,7 +467,6 @@ body {
   resize: vertical;
 }
 
-.process-scroll-bottom,
 .thread-scroll-bottom {
   position: sticky;
   z-index: 5;
@@ -362,12 +479,6 @@ body {
   background: rgb(255 255 255 / 92%);
   color: var(--text-secondary);
   box-shadow: 0 3px 10px rgb(0 0 0 / 8%);
-}
-
-.process-scroll-bottom {
-  right: 0.5rem;
-  bottom: 0.5rem;
-  margin: -2.5rem 0.5rem 0 auto;
 }
 
 .tool-approval-panel {
@@ -460,6 +571,13 @@ body {
 
 .thread-scroll-bottom:disabled {
   visibility: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-spinner,
+  .process-spinner {
+    animation: none !important;
+  }
 }
 
 button,

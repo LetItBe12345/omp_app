@@ -155,9 +155,9 @@ describe('流式投影性能', () => {
         })
       })
       // React 提交时已经更新 DOM。文字断言只检查结果，不计入性能数据。
-      expect(container.querySelector('.process-content')).toHaveTextContent(
-        `可见流式输出 ${second * 100 + 99}`
-      )
+      expect(
+        container.querySelector('.assistant-answer-candidate')
+      ).toHaveTextContent(`可见流式输出 ${second * 100 + 99}`)
     }
 
     const commitP95 = commitLatencies.sort((left, right) => left - right)[
