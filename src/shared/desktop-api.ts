@@ -73,6 +73,29 @@ export type RuntimeSnapshot = {
   error?: RuntimeError
 }
 
+export type SessionRuntimePhase =
+  | 'queued'
+  | 'starting'
+  | 'running'
+  | 'waiting-interaction'
+  | 'stopping'
+  | 'idle'
+  | 'failed'
+
+export type SessionRuntimeState = {
+  runtimeInstanceId: string
+  generation: number
+  workspacePath?: string
+  sessionId?: string
+  phase: SessionRuntimePhase
+  snapshot: RuntimeSnapshot
+  queuePosition?: number
+  temporary?: boolean
+  visible?: boolean
+  temporaryInput?: PromptInput
+  pendingExtensionUi?: OmpEvent[]
+}
+
 export type RuntimeNetworkMode = 'off' | 'auto' | 'manual'
 
 export type RuntimeNetworkConfig = {
@@ -86,6 +109,13 @@ export type RuntimeNetworkStatus = {
   result: 'direct' | 'http-proxy' | 'unsupported-socks'
   proxySource?: string
   error?: string
+}
+
+export type RuntimeSettings = {
+  defaultNetwork: RuntimeNetworkConfig
+  maxParallelSessions: number
+  runningSessions: number
+  waitingSessions: number
 }
 
 export type RuntimeToolDiagnostic = {
@@ -165,6 +195,7 @@ export type ProviderLoginState = {
   canReopenBrowser?: boolean
   input?: {
     id: string
+    sessionId?: string
     message: string
     placeholder?: string
   }
@@ -193,6 +224,7 @@ export type WorkspaceSummary = {
   pinned: boolean
   addedAt: string
   lastUsedAt: string
+  unreadCompletion?: boolean
 }
 
 export type SessionSummary = {
@@ -206,6 +238,7 @@ export type SessionSummary = {
   size: number
   pinned: boolean
   archived: boolean
+  unreadCompletion?: boolean
   compatibility: 'v1' | 'v2' | 'v3' | 'corrupt' | 'future'
   status:
     'complete' | 'interrupted' | 'aborted' | 'error' | 'pending' | 'unknown'
@@ -231,6 +264,11 @@ export type SessionPage = {
 export type CreatedSession = {
   snapshot: RuntimeSnapshot
   session?: SessionSummary
+}
+
+export type QueuedSessionSubmission = {
+  temporarySessionId: string
+  queuePosition?: number
 }
 
 export type ContextCandidate = {
@@ -319,6 +357,22 @@ export type DraftRecord = {
 
 export type RuntimeEvent =
   | { type: 'snapshot'; snapshot: RuntimeSnapshot }
+  | { type: 'session-runtime'; state: SessionRuntimeState }
+  | { type: 'pool-snapshot'; states: SessionRuntimeState[] }
+  | {
+      type: 'temporary-session-bound'
+      temporarySessionId: string
+      snapshot: RuntimeSnapshot
+      session?: SessionSummary
+      active: boolean
+    }
+  | {
+      type: 'temporary-session-failed'
+      temporarySessionId: string
+      input: PromptInput
+      error: RuntimeError
+      reason: 'cancelled' | 'start-failed' | 'runtime-crashed'
+    }
   | { type: 'workspace-activation-failed'; error: RuntimeError }
   | { type: 'provider-login'; state: ProviderLoginState }
   | { type: 'omp-event'; event: OmpEvent }
@@ -411,6 +465,7 @@ export type DesktopApi = {
   ): Promise<DesktopResult<DroppedReferenceResult>>
   getRuntimeState(): Promise<DesktopResult<RuntimeSnapshot>>
   getMessages(): Promise<DesktopResult<unknown>>
+  getSessionMessages(sessionId: string): Promise<DesktopResult<unknown>>
   getAvailableCommands(): Promise<DesktopResult<AvailableSlashCommand[]>>
   getLoginProviders(): Promise<DesktopResult<LoginProvider[]>>
   getAvailableModels(): Promise<DesktopResult<AvailableModel[]>>
@@ -423,30 +478,50 @@ export type DesktopApi = {
   applyRuntimeNetwork(
     config: RuntimeNetworkConfig
   ): Promise<DesktopResult<RuntimeNetworkStatus>>
+  getRuntimeSettings(): Promise<DesktopResult<RuntimeSettings>>
+  applyRuntimeSettings(settings: {
+    defaultNetwork: RuntimeNetworkConfig
+    maxParallelSessions: number
+  }): Promise<DesktopResult<RuntimeSettings>>
   detectRuntimeProxy(): Promise<DesktopResult<RuntimeNetworkStatus>>
   checkRuntimeProxyPort(port: number): Promise<DesktopResult<boolean>>
   getRuntimeEnvironmentDiagnostic(): Promise<
     DesktopResult<RuntimeEnvironmentDiagnostic>
   >
-  prompt(input: PromptInput): Promise<DesktopResult<void>>
-  followUp(input: PromptInput): Promise<DesktopResult<void>>
-  stopCurrentRun(): Promise<DesktopResult<PromptInput | null>>
+  prompt(sessionId: string, input: PromptInput): Promise<DesktopResult<void>>
+  followUp(sessionId: string, input: PromptInput): Promise<DesktopResult<void>>
+  stopCurrentRun(sessionId: string): Promise<DesktopResult<PromptInput | null>>
+  stopSession(sessionId: string): Promise<DesktopResult<PromptInput | null>>
   newSession(): Promise<DesktopResult<RuntimeSnapshot>>
   createSession(
     input: PromptInput,
     title: string,
     approvalMode: ApprovalMode
-  ): Promise<DesktopResult<CreatedSession>>
+  ): Promise<DesktopResult<QueuedSessionSubmission>>
+  cancelQueuedSession(
+    temporarySessionId: string
+  ): Promise<DesktopResult<PromptInput>>
+  selectTemporarySession(
+    temporarySessionId: string
+  ): Promise<DesktopResult<RuntimeSnapshot>>
   switchSession(sessionId: string): Promise<DesktopResult<RuntimeSnapshot>>
   setApprovalMode(
+    sessionId: string,
     approvalMode: ApprovalMode
   ): Promise<DesktopResult<RuntimeSnapshot>>
   selectModel(
+    sessionId: string,
     selection: ModelSelection
   ): Promise<DesktopResult<RuntimeSnapshot>>
-  cancelPendingModelSelection(): Promise<DesktopResult<RuntimeSnapshot>>
-  setThinkingLevel(level: string): Promise<DesktopResult<void>>
+  cancelPendingModelSelection(
+    sessionId: string
+  ): Promise<DesktopResult<RuntimeSnapshot>>
+  setThinkingLevel(
+    sessionId: string,
+    level: string
+  ): Promise<DesktopResult<void>>
   respondExtensionUi(
+    sessionId: string | null,
     id: string,
     response: ExtensionUiResponse
   ): Promise<DesktopResult<void>>
@@ -483,6 +558,7 @@ export const IPC_CHANNELS = {
   followUp: 'runtime:follow-up',
   getAvailableCommands: 'runtime:get-available-commands',
   getMessages: 'runtime:get-messages',
+  getSessionMessages: 'runtime:get-session-messages',
   getLoginProviders: 'runtime:get-login-providers',
   getAvailableModels: 'runtime:get-available-models',
   getProviderLoginState: 'runtime:get-provider-login-state',
@@ -490,6 +566,8 @@ export const IPC_CHANNELS = {
   log: 'desktop:log',
   newSession: 'runtime:new-session',
   createSession: 'runtime:create-session',
+  cancelQueuedSession: 'runtime:cancel-queued-session',
+  selectTemporarySession: 'runtime:select-temporary-session',
   openExternal: 'desktop:open-external',
   openRuntimeLog: 'runtime:open-log',
   performance: 'desktop:performance',
@@ -500,6 +578,8 @@ export const IPC_CHANNELS = {
   restartRuntime: 'runtime:restart',
   getRuntimeNetwork: 'runtime-network:get',
   applyRuntimeNetwork: 'runtime-network:apply',
+  getRuntimeSettings: 'runtime-settings:get',
+  applyRuntimeSettings: 'runtime-settings:apply',
   detectRuntimeProxy: 'runtime-network:detect',
   checkRuntimeProxyPort: 'runtime-network:check-port',
   getRuntimeEnvironmentDiagnostic: 'runtime-environment:diagnostic',
@@ -510,5 +590,6 @@ export const IPC_CHANNELS = {
   setThinkingLevel: 'runtime:set-thinking-level',
   setApprovalMode: 'runtime:set-approval-mode',
   stopCurrentRun: 'runtime:stop-current-run',
+  stopSession: 'runtime:stop-session',
   switchSession: 'runtime:switch-session'
 } as const

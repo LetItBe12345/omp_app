@@ -44,6 +44,19 @@ describe('RuntimeSupervisor', () => {
     })
   })
 
+  it('诊断记录带 Runtime 关联信息和事件类型', async () => {
+    supervisor.setDiagnosticContext(
+      () =>
+        '[runtime=runtime-1] [generation=2] [workspace=workspace-1] [session=session-1]'
+    )
+    supervisor.recordDiagnostic('测试记录')
+    await diagnostics.flush()
+
+    await expect(readFile(diagnostics.filePath, 'utf8')).resolves.toContain(
+      '[runtime=runtime-1] [generation=2] [workspace=workspace-1] [session=session-1] [event=runtime] 测试记录'
+    )
+  })
+
   it('启动初始化完成后才发布 ready', async () => {
     const fixture = resolve('tests/fixtures/fake-omp.mjs')
     const commandLog = join(temporaryDirectory, 'commands.log')
@@ -79,6 +92,30 @@ describe('RuntimeSupervisor', () => {
     ])
   })
 
+  it('基线测试模式关闭 Runtime 自动重试', async () => {
+    const fixture = resolve('tests/fixtures/fake-omp.mjs')
+    const commandLog = join(temporaryDirectory, 'commands.log')
+    supervisor = new RuntimeSupervisor({
+      runtimePath: process.execPath,
+      diagnostics,
+      disableAutoRetry: true,
+      spawnRuntime: (_executable, args, options) =>
+        spawn(process.execPath, [fixture, ...args], {
+          ...options,
+          env: { ...options.env, FAKE_COMMAND_LOG: commandLog },
+          stdio: ['pipe', 'pipe', 'pipe']
+        })
+    })
+
+    await supervisor.start(process.cwd())
+
+    expect((await readFile(commandLog, 'utf8')).trim().split('\n')).toEqual([
+      'set_follow_up_mode',
+      'set_auto_retry',
+      'get_state'
+    ])
+  })
+
   it('使用固定参数数组传入 Session 权限', async () => {
     const fixture = resolve('tests/fixtures/fake-omp.mjs')
     let spawnedArgs: string[] = []
@@ -109,6 +146,39 @@ describe('RuntimeSupervisor', () => {
       approvalMode: 'write',
       runtimeVersion: '17.0.6'
     })
+  })
+
+  it('在固定 RPC 参数后追加基线测试参数', async () => {
+    const fixture = resolve('tests/fixtures/fake-omp.mjs')
+    let spawnedArgs: string[] = []
+    supervisor = new RuntimeSupervisor({
+      runtimePath: process.execPath,
+      diagnostics,
+      runtimeVersion: '17.0.6',
+      extraRuntimeArgs: ['--model', 'test/fake-model', '--thinking', 'low'],
+      spawnRuntime: (_executable, args, options) => {
+        spawnedArgs = args
+        return spawn(process.execPath, [fixture, ...args], {
+          ...options,
+          stdio: ['pipe', 'pipe', 'pipe']
+        })
+      }
+    })
+
+    await supervisor.start(process.cwd(), process.env, 'write')
+
+    expect(spawnedArgs).toEqual([
+      '--mode',
+      'rpc',
+      '--cwd',
+      process.cwd(),
+      '--approval-mode',
+      'write',
+      '--model',
+      'test/fake-model',
+      '--thinking',
+      'low'
+    ])
   })
 
   it('启动和重启时使用调用方提供的最终环境', async () => {
@@ -530,6 +600,42 @@ describe('RuntimeSupervisor', () => {
     ).rejects.toMatchObject({ code: 'RPC_TIMEOUT' })
     await new Promise((resolve) => setTimeout(resolve, 70))
     expect(supervisor.snapshot.status).toBe('ready')
+  })
+
+  it('不同 Runtime 使用相同 RPC Request ID 时仍各自接收响应', async () => {
+    const fixture = resolve('tests/fixtures/fake-omp.mjs')
+    const createSupervisor = (name: string): RuntimeSupervisor =>
+      new RuntimeSupervisor({
+        runtimePath: process.execPath,
+        diagnostics: new RuntimeDiagnostics(
+          join(temporaryDirectory, `${name}.log`)
+        ),
+        requestId: () => 'same-request-id',
+        spawnRuntime: (_executable, args, options) =>
+          spawn(process.execPath, [fixture, ...args], {
+            ...options,
+            stdio: ['pipe', 'pipe', 'pipe']
+          })
+      })
+    const first = createSupervisor('first-runtime')
+    const second = createSupervisor('second-runtime')
+    try {
+      await Promise.all([
+        first.start(process.cwd()),
+        second.start(process.cwd())
+      ])
+      await expect(
+        Promise.all([
+          first.request({ type: 'delayed', value: 'first', delay: 20 }, 200),
+          second.request({ type: 'delayed', value: 'second', delay: 5 }, 200)
+        ])
+      ).resolves.toMatchObject([
+        { data: { value: 'first' } },
+        { data: { value: 'second' } }
+      ])
+    } finally {
+      await Promise.all([first.stop(), second.stop()])
+    }
   })
 
   it('abort 超时后重启 Runtime 并恢复可用状态', async () => {

@@ -39,6 +39,7 @@ function Harness({
         onCancel={async () => undefined}
         onSend={async () => undefined}
         projection={projection}
+        sessionId="session-1"
         setProjection={setProjection}
         workspacePath={workspacePath}
       >
@@ -132,6 +133,7 @@ describe('ConversationThread', () => {
     expect(screen.getByRole('button', { name: '允许' })).toHaveFocus()
     fireEvent.click(screen.getByRole('button', { name: '允许' }))
     expect(window.desktop.respondExtensionUi).toHaveBeenCalledWith(
+      'session-1',
       'approval-1',
       { value: 'Approve' }
     )
@@ -158,10 +160,12 @@ describe('ConversationThread', () => {
     expect(screen.getByText('待确认 2 / 2')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '全部拒绝' }))
     expect(window.desktop.respondExtensionUi).toHaveBeenCalledWith(
+      'session-1',
       'approval-1',
       { value: 'Deny' }
     )
     expect(window.desktop.respondExtensionUi).toHaveBeenCalledWith(
+      'session-1',
       'approval-2',
       { value: 'Deny' }
     )
@@ -244,9 +248,11 @@ describe('ConversationThread', () => {
     ).toHaveAttribute('aria-expanded', 'true')
     fireEvent.click(screen.getByRole('button', { name: '开发' }))
     await waitFor(() =>
-      expect(window.desktop.respondExtensionUi).toHaveBeenCalledWith('ui-1', {
-        value: 'dev'
-      })
+      expect(window.desktop.respondExtensionUi).toHaveBeenCalledWith(
+        'session-1',
+        'ui-1',
+        { value: 'dev' }
+      )
     )
     await waitFor(() =>
       expect(screen.queryByText('选择环境')).not.toBeInTheDocument()

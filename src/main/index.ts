@@ -19,6 +19,7 @@ import { DesktopStateStore } from './desktop-state'
 import { registerRuntimeIpc } from './runtime-ipc'
 import { RuntimeDiagnostics } from './runtime-diagnostics'
 import { RuntimeSupervisor } from './runtime-supervisor'
+import { RuntimePool } from './runtime-pool'
 import { RuntimeEnvironmentResolver } from './runtime-environment'
 import { listWorkspaceSessions } from './session-catalog'
 import { installNavigationSecurity, installSessionSecurity } from './security'
@@ -29,6 +30,7 @@ import { registerWorkspaceFilesIpc } from './workspace-files'
 const development = Boolean(process.env['ELECTRON_RENDERER_URL'])
 const runtimeSmokeMode = process.argv.includes('--runtime-smoke')
 const smokeMode = process.argv.includes('--smoke') || runtimeSmokeMode
+const runtimeBenchmarkMode = process.argv.includes('--runtime-benchmark')
 const setupProviderMode = process.argv.includes('--setup-provider')
 const supportedCliFlags = new Set([
   '--version',
@@ -36,11 +38,13 @@ const supportedCliFlags = new Set([
   '--no-sandbox',
   '--setup-provider',
   '--smoke',
-  '--runtime-smoke'
+  '--runtime-smoke',
+  '--runtime-benchmark'
 ])
 function isSupportedCliArg(arg: string): boolean {
   return (
     supportedCliFlags.has(arg) ||
+    arg.startsWith('--remote-debugging-port=') ||
     arg === '--ozone-platform=x11' ||
     arg === '--ozone-platform=wayland'
   )
@@ -53,11 +57,23 @@ let smokeFinishing = false
 let shutdownStarted = false
 let cleanupWorkspaceFiles: (() => void) | undefined
 let runtimeRestorePromise: Promise<void> | null = null
+let benchmarkMetricsTimer: NodeJS.Timeout | undefined
 
 configureLinuxFileChooser(app.commandLine)
 const linuxInputMethod = configureLinuxInputMethod(app.commandLine)
 app.setName('OMP Desktop')
-app.setPath('userData', join(app.getPath('appData'), 'OMP Desktop'))
+const smokeUserData = process.env['OMP_DESKTOP_SMOKE_USER_DATA']
+const benchmarkUserData = process.env['OMP_DESKTOP_BENCHMARK_USER_DATA']
+if (runtimeBenchmarkMode && !benchmarkUserData)
+  throw new Error('Runtime benchmark 缺少独立 userData 目录')
+app.setPath(
+  'userData',
+  runtimeBenchmarkMode && benchmarkUserData
+    ? benchmarkUserData
+    : smokeMode && smokeUserData
+      ? smokeUserData
+      : join(app.getPath('appData'), 'OMP Desktop')
+)
 app.setAppLogsPath()
 initializeLogger()
 log.info('Linux 输入法配置', { backend: linuxInputMethod })
@@ -65,9 +81,35 @@ log.info('Linux 输入法配置', { backend: linuxInputMethod })
 const runtimePath = app.isPackaged
   ? join(process.resourcesPath, 'runtime', 'omp')
   : join(__dirname, '../../runtime/omp')
-const runtimeSupervisor = new RuntimeSupervisor({
-  runtimePath,
-  diagnostics: new RuntimeDiagnostics(join(app.getPath('logs'), 'runtime.log'))
+const runtimeDiagnostics = new RuntimeDiagnostics(
+  join(app.getPath('logs'), 'runtime.log')
+)
+const createRuntimeSupervisor = (): RuntimeSupervisor =>
+  new RuntimeSupervisor({
+    runtimePath,
+    diagnostics: runtimeDiagnostics,
+    autoRestartOnCrash: false,
+    ...(runtimeBenchmarkMode
+      ? {
+          extraRuntimeArgs: [
+            '--model',
+            'openai-codex/gpt-5.4-mini',
+            '--thinking',
+            'low',
+            '--no-tools',
+            '--no-extensions',
+            '--no-skills',
+            '--no-rules',
+            '--no-title'
+          ],
+          disableAutoRetry: true
+        }
+      : {})
+  })
+const runtimeSupervisor = new RuntimePool({
+  createSupervisor: createRuntimeSupervisor,
+  initialSupervisor: createRuntimeSupervisor(),
+  maxParallel: 1
 })
 const runtimeEnvironmentResolver = new RuntimeEnvironmentResolver(runtimePath)
 const runtimeStatePath = join(app.getPath('userData'), 'runtime-state.json')
@@ -75,6 +117,27 @@ const desktopStateStore = new DesktopStateStore(
   join(app.getPath('userData'), 'desktop-state.json'),
   runtimeStatePath
 )
+
+function startBenchmarkMetrics(): void {
+  if (!runtimeBenchmarkMode || benchmarkMetricsTimer) return
+  const metricsPath = join(
+    app.getPath('userData'),
+    'benchmark-app-metrics.json'
+  )
+  const record = (): void => {
+    void writeFile(
+      metricsPath,
+      JSON.stringify({
+        timestamp: new Date().toISOString(),
+        metrics: app.getAppMetrics()
+      })
+    ).catch((error: unknown) =>
+      log.warn('Runtime benchmark 进程指标写入失败', error)
+    )
+  }
+  record()
+  benchmarkMetricsTimer = setInterval(record, 1_000)
+}
 
 function runProviderSetup(): void {
   const setupProfile = process.env['OMP_DESKTOP_SETUP_PROFILE']
@@ -127,9 +190,25 @@ async function restoreRuntimeState(): Promise<void> {
         })
         .catch((error: unknown) => log.warn('补存 Session 默认权限失败', error))
     }
-    const resolved = await runtimeEnvironmentResolver.resolve(
-      desktopStateStore.runtimeNetworkConfig()
+    const network = workspace.activeSessionId
+      ? (desktopStateStore.sessionPreference(
+          workspace.id,
+          workspace.activeSessionId
+        ).network ?? desktopStateStore.runtimeNetworkConfig())
+      : desktopStateStore.runtimeNetworkConfig()
+    if (
+      workspace.activeSessionId &&
+      !desktopStateStore.sessionPreference(
+        workspace.id,
+        workspace.activeSessionId
+      ).network
     )
+      await desktopStateStore.updateSessionPreference(
+        workspace.id,
+        workspace.activeSessionId,
+        { network }
+      )
+    const resolved = await runtimeEnvironmentResolver.resolve(network)
     runtimeSupervisor.recordDiagnostic(
       resolved.sourceError
         ? 'Login Shell 环境探测失败，已使用 Electron 启动环境'
@@ -182,7 +261,9 @@ async function restoreRuntimeState(): Promise<void> {
 }
 
 const standaloneCliMode =
-  setupProviderMode || process.argv.includes('--version')
+  setupProviderMode ||
+  runtimeBenchmarkMode ||
+  process.argv.includes('--version')
 const hasSingleInstanceLock =
   standaloneCliMode || app.requestSingleInstanceLock()
 if (!hasSingleInstanceLock) app.quit()
@@ -216,6 +297,7 @@ function registerIpc(): void {
   ipcMain.on(IPC_CHANNELS.rendererReady, () => {
     if (runtimeSmokeMode) void finishRuntimeSmoke()
     else if (smokeMode) void finishSmoke()
+    else if (runtimeBenchmarkMode) process.stdout.write('OMP_BENCHMARK_READY\n')
   })
 }
 
@@ -303,7 +385,7 @@ function createWindow(): BrowserWindow {
     minWidth: 1024,
     minHeight: 700,
     center: true,
-    show: smokeMode,
+    show: smokeMode || runtimeBenchmarkMode,
     backgroundColor: '#f7f7f6',
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
@@ -366,9 +448,16 @@ function createWindow(): BrowserWindow {
 
   window.on('close', (event) => {
     const runtime = runtimeSupervisor.snapshot
+    const hasActiveRuntime = runtimeSupervisor.states.some((state) =>
+      ['starting', 'running', 'waiting-interaction', 'stopping'].includes(
+        state.phase
+      )
+    )
     if (
       allowWindowClose ||
-      (!runtime.isStreaming && runtime.queuedMessageCount === 0)
+      (!hasActiveRuntime &&
+        !runtime.isStreaming &&
+        runtime.queuedMessageCount === 0)
     ) {
       return
     }
@@ -442,8 +531,11 @@ if (hasSingleInstanceLock) {
     recordMainPerformance('app_ready')
     Menu.setApplicationMenu(null)
     await desktopStateStore.load()
+    await desktopStateStore.ensureSessionNetworkMigrationBaseline()
+    runtimeSupervisor.setMaxParallel(desktopStateStore.maxParallelSessions())
     registerIpc()
     createWindow()
+    startBenchmarkMetrics()
     registerRuntimeIpc(
       runtimeSupervisor,
       desktopStateStore,
@@ -470,6 +562,8 @@ if (hasSingleInstanceLock) {
 app.on('window-all-closed', () => {
   if (shutdownStarted) return
   shutdownStarted = true
+  if (benchmarkMetricsTimer) clearInterval(benchmarkMetricsTimer)
+  benchmarkMetricsTimer = undefined
   cleanupWorkspaceFiles?.()
   cleanupWorkspaceFiles = undefined
   void runtimeSupervisor

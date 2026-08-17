@@ -6,6 +6,21 @@ import { describe, expect, it } from 'vitest'
 import { DesktopStateStore } from '../../src/main/desktop-state'
 
 describe('DesktopStateStore', () => {
+  it('最大并行数量默认 5，并持久化 1–10 的设置', async () => {
+    const root = join(tmpdir(), `omp-parallel-${process.pid}-${Date.now()}`)
+    await mkdir(root, { recursive: true })
+    const path = join(root, 'desktop-state.json')
+    const store = new DesktopStateStore(path)
+    await store.load()
+    expect(store.maxParallelSessions()).toBe(5)
+
+    await store.setMaxParallelSessions(8)
+    const reloaded = new DesktopStateStore(path)
+    await reloaded.load()
+    expect(reloaded.maxParallelSessions()).toBe(8)
+    await expect(reloaded.setMaxParallelSessions(11)).rejects.toThrow('1–10')
+  })
+
   it('全局保存代理模式并保留上次手动端口', async () => {
     const root = join(tmpdir(), `omp-network-${process.pid}-${Date.now()}`)
     await mkdir(root, { recursive: true })
@@ -23,6 +38,25 @@ describe('DesktopStateStore', () => {
       mode: 'off',
       manualPort: 7890
     })
+  })
+
+  it('升级时固定旧 Session 的网络迁移基准，不随新默认值变化', async () => {
+    const root = join(
+      tmpdir(),
+      `omp-network-migration-${process.pid}-${Date.now()}`
+    )
+    await mkdir(root, { recursive: true })
+    const store = new DesktopStateStore(join(root, 'desktop-state.json'))
+    await store.load()
+    await store.setRuntimeNetworkConfig({ mode: 'manual', manualPort: 7890 })
+    await store.ensureSessionNetworkMigrationBaseline()
+    await store.setRuntimeNetworkConfig({ mode: 'off' })
+
+    expect(store.sessionNetworkMigrationBaseline()).toEqual({
+      mode: 'manual',
+      manualPort: 7890
+    })
+    expect(store.runtimeNetworkConfig()).toEqual({ mode: 'off' })
   })
 
   it('生成稳定 Workspace ID 并使用 0600 原子配置', async () => {
@@ -117,6 +151,46 @@ describe('DesktopStateStore', () => {
     expect(
       reloaded.sessionPreference(first.id, 'invalid').approvalMode
     ).toBeUndefined()
+  })
+
+  it('按 Session 隔离网络配置和未查看完成状态', async () => {
+    const root = join(
+      tmpdir(),
+      `omp-session-network-${process.pid}-${Date.now()}`
+    )
+    const workspacePath = join(root, 'workspace')
+    await mkdir(workspacePath, { recursive: true })
+    const store = new DesktopStateStore(join(root, 'desktop-state.json'))
+    await store.load()
+    const workspace = await store.addWorkspace(workspacePath)
+    await store.updateSessionPreference(workspace.id, 'first', {
+      network: { mode: 'manual', manualPort: 7890 },
+      unreadCompletion: true
+    })
+    await store.updateSessionPreference(workspace.id, 'second', {
+      network: { mode: 'off' }
+    })
+
+    expect(store.sessionPreference(workspace.id, 'first')).toMatchObject({
+      network: { mode: 'manual', manualPort: 7890 },
+      unreadCompletion: true
+    })
+    expect(store.sessionPreference(workspace.id, 'second').network).toEqual({
+      mode: 'off'
+    })
+    const reloaded = new DesktopStateStore(join(root, 'desktop-state.json'))
+    await reloaded.load()
+    expect(
+      reloaded.sessionPreference(workspace.id, 'first').unreadCompletion
+    ).toBe(true)
+    await reloaded.updateSessionPreference(workspace.id, 'first', {
+      unreadCompletion: false
+    })
+    const cleared = new DesktopStateStore(join(root, 'desktop-state.json'))
+    await cleared.load()
+    expect(
+      cleared.sessionPreference(workspace.id, 'first').unreadCompletion
+    ).toBe(false)
   })
 
   it('只清除仍然匹配的活动 Session，并保留 Session 偏好', async () => {

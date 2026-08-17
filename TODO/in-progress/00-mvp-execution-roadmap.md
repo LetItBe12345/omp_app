@@ -26,14 +26,14 @@
 - [x] [MVP-06：Session 权限与工具审批](../done/06-session-permissions-and-tool-approvals.md)
 - [x] MVP-07：Slash Command 发现、补全与执行
 - [x] [MVP-08：文件树、文件搜索与上下文引用](../done/08-file-tree-and-context-references.md)
-- [ ] [MVP-09：OMP Runtime 环境与网络](./09-runtime-environment-and-network.md)
+- [x] [MVP-09：OMP Runtime 环境与网络](../done/09-runtime-environment-and-network.md)
 - [ ] [MVP-10：Ubuntu 打包与 MVP 验收](./10-ubuntu-packaging-and-acceptance.md)
 
 ## MVP 之后
 
 - [ ] [POST-MVP-01：Changes、Review 与 Diff](./11-changes-review-and-diff.md)
 - [ ] [POST-MVP-02：内置多标签 Terminal](./12-multi-tab-terminal.md)
-- [ ] [POST-MVP-03：多 Session 并行 Runtime](./13-parallel-session-runtimes.md)
+- [x] [POST-MVP-03：多 Session 并行 Runtime](../done/13-parallel-session-runtimes.md)
 
 ## 依赖关系
 

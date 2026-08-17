@@ -32,7 +32,9 @@
     "test:workspace-session": "vitest run tests/main/desktop-state.test.ts tests/main/runtime-ipc.test.ts tests/renderer/app.test.tsx",
     "test:watch": "vitest",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test",
-    "smoke": "node scripts/electron-smoke.mjs"
+    "smoke": "node scripts/electron-smoke.mjs",
+    "benchmark:runtime-startup": "node scripts/runtime-startup-baseline.mjs",
+    "benchmark:runtime-headed": "node scripts/headed-runtime-benchmark.mjs"
   },
   "dependencies": {
     "electron-log": "^5.4.4",

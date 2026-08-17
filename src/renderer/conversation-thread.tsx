@@ -69,6 +69,7 @@ import {
 type ConversationContextValue = {
   projection: ConversationProjection
   setProjection: React.Dispatch<React.SetStateAction<ConversationProjection>>
+  sessionId?: string
   workspacePath?: string
 }
 
@@ -544,7 +545,7 @@ function Interaction({
 }: {
   interaction: InteractionItem
 }): React.JSX.Element {
-  const { setProjection } = useConversationContext()
+  const { sessionId, setProjection } = useConversationContext()
   const [value, setValue] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [now, setNow] = useState(0)
@@ -559,8 +560,10 @@ function Interaction({
   }, [interaction.deadline, interaction.timedOut])
   const respond = async (response: ExtensionUiResponse): Promise<void> => {
     if (submitting) return
+    if (!sessionId) return
     setSubmitting(true)
     const result = await window.desktop.respondExtensionUi(
+      sessionId,
       interaction.requestId,
       response
     )
@@ -862,6 +865,7 @@ function NarrativeMarkdown({
   return (
     <TextMessagePartProvider text={item.text} isRunning={candidate}>
       <div
+        data-slot={candidate ? 'assistant-visible-text' : undefined}
         className={
           candidate
             ? 'assistant-answer-candidate prose max-w-none'
@@ -1111,7 +1115,10 @@ function AssistantMessage(): React.JSX.Element | null {
       {commandResults.map((item) => (
         <CommandResultCard item={item} key={item.id} />
       ))}
-      <div className="assistant-final prose max-w-none">
+      <div
+        className="assistant-final prose max-w-none"
+        data-slot="assistant-visible-text"
+      >
         <MessagePrimitive.Parts
           components={{
             Text: () => (
@@ -1272,6 +1279,7 @@ function ToolApprovalPanel({
 }: {
   requests: ToolApprovalRequest[]
 }): React.JSX.Element | null {
+  const { sessionId } = useConversationContext()
   const [now, setNow] = useState(0)
   const primaryButton = useRef<HTMLButtonElement | null>(null)
   const previousCount = useRef(0)
@@ -1303,7 +1311,16 @@ function ToolApprovalPanel({
   if (requests.length === 0) return null
 
   const respond = (request: ToolApprovalRequest, value: 'Approve' | 'Deny') =>
-    window.desktop.respondExtensionUi(request.id, { value })
+    sessionId
+      ? window.desktop.respondExtensionUi(sessionId, request.id, { value })
+      : Promise.resolve({
+          ok: false as const,
+          error: {
+            code: 'SESSION_NOT_FOUND' as const,
+            message: 'Session ID 不可用',
+            retryable: false
+          }
+        })
   const respondAll = (value: 'Approve' | 'Deny'): void => {
     for (const request of pending) void respond(request, value)
   }
@@ -1402,6 +1419,7 @@ export function ConversationRuntime({
   projection,
   setProjection,
   isRunning,
+  sessionId,
   workspacePath,
   onSend,
   onCancel,
@@ -1410,6 +1428,7 @@ export function ConversationRuntime({
   projection: ConversationProjection
   setProjection: React.Dispatch<React.SetStateAction<ConversationProjection>>
   isRunning: boolean
+  sessionId?: string
   workspacePath?: string
   onSend: (message: string) => Promise<void>
   onCancel: () => Promise<void>
@@ -1449,7 +1468,7 @@ export function ConversationRuntime({
   const messageKey = messages.map((message) => message.id).join('\n')
   return (
     <ConversationContext.Provider
-      value={{ projection, setProjection, workspacePath }}
+      value={{ projection, setProjection, sessionId, workspacePath }}
     >
       <SettledTurnsContext.Provider value={settledContext}>
         <AssistantRuntimeProvider key={messageKey} runtime={runtime}>

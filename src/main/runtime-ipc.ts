@@ -20,6 +20,7 @@ import type {
   RuntimeError,
   RuntimeSnapshot,
   RuntimeNetworkConfig,
+  SessionRuntimeState,
   ProviderLoginState,
   WorkspaceActivation,
   WorkspaceSummary
@@ -30,7 +31,7 @@ import type { DesktopStateStore } from './desktop-state'
 import { validateExternalUrl } from './external-url'
 import { redactRuntimeLog } from './runtime-diagnostics'
 import { RuntimeFailure } from './runtime-supervisor'
-import type { RuntimeSupervisor } from './runtime-supervisor'
+import type { RuntimeController } from './runtime-pool'
 import {
   checkLocalProxyPort,
   RuntimeEnvironmentResolver
@@ -272,7 +273,7 @@ function validateApprovalMode(value: unknown): ApprovalMode {
 }
 
 export function registerRuntimeIpc(
-  supervisor: RuntimeSupervisor,
+  supervisor: RuntimeController,
   stateStore: DesktopStateStore,
   getWindow: WindowGetter,
   developmentUrl?: string,
@@ -311,6 +312,15 @@ export function registerRuntimeIpc(
   let hostUriRegistration: Promise<void> | null = null
   let contextSearch: AbortController | null = null
   let activatingWorkspacePath: string | null = null
+  const queuedSessionPreferences = new Map<
+    string,
+    {
+      workspaceId: string
+      approvalMode: ApprovalMode
+      network: RuntimeNetworkConfig
+      input: PromptInput
+    }
+  >()
   const channels = [
     IPC_CHANNELS.chooseWorkspace,
     IPC_CHANNELS.getWorkspaces,
@@ -330,18 +340,24 @@ export function registerRuntimeIpc(
     IPC_CHANNELS.getLoginProviders,
     IPC_CHANNELS.getProviderLoginState,
     IPC_CHANNELS.getMessages,
+    IPC_CHANNELS.getSessionMessages,
     IPC_CHANNELS.getRuntimeState,
     IPC_CHANNELS.restartRuntime,
     IPC_CHANNELS.getRuntimeNetwork,
     IPC_CHANNELS.applyRuntimeNetwork,
+    IPC_CHANNELS.getRuntimeSettings,
+    IPC_CHANNELS.applyRuntimeSettings,
     IPC_CHANNELS.detectRuntimeProxy,
     IPC_CHANNELS.checkRuntimeProxyPort,
     IPC_CHANNELS.getRuntimeEnvironmentDiagnostic,
     IPC_CHANNELS.prompt,
     IPC_CHANNELS.followUp,
     IPC_CHANNELS.stopCurrentRun,
+    IPC_CHANNELS.stopSession,
     IPC_CHANNELS.newSession,
     IPC_CHANNELS.createSession,
+    IPC_CHANNELS.cancelQueuedSession,
+    IPC_CHANNELS.selectTemporarySession,
     IPC_CHANNELS.openRuntimeLog,
     IPC_CHANNELS.switchSession,
     IPC_CHANNELS.loginProvider,
@@ -522,6 +538,85 @@ export function registerRuntimeIpc(
     publishSnapshot(snapshot)
   }
 
+  const onSessionSnapshot = (state: SessionRuntimeState): void => {
+    send({ type: 'session-runtime', state })
+  }
+
+  const onPoolSnapshot = (states: SessionRuntimeState[]): void => {
+    send({ type: 'pool-snapshot', states })
+  }
+
+  const onTemporarySessionBound = (payload: Record<string, unknown>): void => {
+    const temporarySessionId = payload['temporarySessionId']
+    const snapshot = payload['snapshot']
+    if (
+      typeof temporarySessionId !== 'string' ||
+      !snapshot ||
+      typeof snapshot !== 'object' ||
+      Array.isArray(snapshot)
+    )
+      return
+    const runtimeSnapshot = snapshot as RuntimeSnapshot
+    const sessionId = runtimeSnapshot.sessionId
+    const preference = queuedSessionPreferences.get(temporarySessionId)
+    if (!sessionId || !preference) return
+    queuedSessionPreferences.delete(temporarySessionId)
+    void (async () => {
+      await stateStore.updateSessionPreference(
+        preference.workspaceId,
+        sessionId,
+        {
+          approvalMode: preference.approvalMode,
+          network: preference.network
+        }
+      )
+      const active = payload['active'] === true
+      if (active)
+        await stateStore.setActiveSession(preference.workspaceId, sessionId)
+      const session = await requireSession(preference.workspaceId, sessionId)
+        .then((result) =>
+          stateStore.applyPreferences(preference.workspaceId, result.session)
+        )
+        .catch(() => undefined)
+      send({
+        type: 'temporary-session-bound',
+        temporarySessionId,
+        snapshot: runtimeSnapshot,
+        ...(session ? { session } : {}),
+        active
+      })
+    })().catch((error: unknown) => {
+      log.warn('保存新 Session 配置失败', error)
+      send({
+        type: 'temporary-session-bound',
+        temporarySessionId,
+        snapshot: runtimeSnapshot,
+        active: payload['active'] === true
+      })
+    })
+  }
+
+  const onTemporarySessionFailed = (payload: Record<string, unknown>): void => {
+    const temporarySessionId = payload['temporarySessionId']
+    const input = payload['input']
+    if (
+      typeof temporarySessionId !== 'string' ||
+      !input ||
+      typeof input !== 'object' ||
+      Array.isArray(input)
+    )
+      return
+    const preference = queuedSessionPreferences.get(temporarySessionId)
+    queuedSessionPreferences.delete(temporarySessionId)
+    send({
+      type: 'temporary-session-failed',
+      temporarySessionId,
+      input: preference?.input ?? (input as PromptInput),
+      error: runtimeError(payload['error']),
+      reason: 'start-failed'
+    })
+  }
+
   const ensureHostUriRegistered = async (): Promise<void> => {
     if (hostUriRegistered) return
     if (hostUriRegistration) return hostUriRegistration
@@ -578,10 +673,10 @@ export function registerRuntimeIpc(
     }
   }
 
-  const resolveRuntimeEnvironment = async () => {
-    const resolved = await environmentResolver.resolve(
-      stateStore.runtimeNetworkConfig()
-    )
+  const resolveRuntimeEnvironment = async (
+    config = stateStore.runtimeNetworkConfig()
+  ) => {
+    const resolved = await environmentResolver.resolve(config)
     supervisor.recordDiagnostic(
       resolved.sourceError
         ? 'Login Shell 环境探测失败，已使用 Electron 启动环境'
@@ -736,6 +831,46 @@ export function registerRuntimeIpc(
     return { workspace, session }
   }
 
+  const requireTargetSessionId = async (value: unknown): Promise<string> => {
+    if (typeof value !== 'string' || value.length === 0)
+      throw new RuntimeFailure('INVALID_ARGUMENT', 'Session ID 无效', false)
+    await requireSession(activeWorkspace().id, value)
+    return value
+  }
+
+  const assertTargetSwitchAllowed = (sessionId: string): void => {
+    if (activatingWorkspacePath)
+      throw new RuntimeFailure(
+        'RUNTIME_NOT_READY',
+        'Workspace 正在启动，请稍候',
+        true
+      )
+    const snapshot = supervisor.supportsParallelSessions
+      ? supervisor.states?.find((state) => state.sessionId === sessionId)
+          ?.snapshot
+      : supervisor.snapshot.sessionId === sessionId
+        ? supervisor.snapshot
+        : undefined
+    if (!snapshot)
+      throw new RuntimeFailure(
+        'SESSION_NOT_FOUND',
+        'Session 没有活动 Runtime',
+        false
+      )
+    if (
+      snapshot.status === 'starting' ||
+      snapshot.status === 'stopping' ||
+      snapshot.isStreaming ||
+      snapshot.queuedMessageCount > 0 ||
+      snapshot.toolApprovals?.some((item) => item.status === 'pending')
+    )
+      throw new RuntimeFailure(
+        'RUNTIME_NOT_READY',
+        '目标 Session 的任务、Follow-up 或交互仍在进行，请先 Stop',
+        true
+      )
+  }
+
   const sessionApprovalMode = async (
     workspaceId: string,
     sessionId: string
@@ -758,12 +893,46 @@ export function registerRuntimeIpc(
     return 'yolo'
   }
 
+  const sessionNetworkConfig = async (
+    workspaceId: string,
+    sessionId: string
+  ): Promise<RuntimeNetworkConfig> => {
+    const stored = stateStore.sessionPreference(workspaceId, sessionId).network
+    if (stored) return stored
+    const migrated = stateStore.sessionNetworkMigrationBaseline()
+    await stateStore
+      .updateSessionPreference(workspaceId, sessionId, { network: migrated })
+      .catch((error: unknown) => log.warn('补存 Session 网络配置失败', error))
+    return migrated
+  }
+
   const switchRuntimeSession = async (
     workspaceId: string,
     session: Awaited<ReturnType<typeof requireSession>>['session'],
     approvalMode: ApprovalMode
   ): Promise<RuntimeSnapshot> => {
     supervisor.trustSession(session.id, session.path)
+    await stateStore.updateSessionPreference(workspaceId, session.id, {
+      unreadCompletion: false
+    })
+    if (supervisor.selectSession) {
+      const workspace = requireWorkspace(workspaceId)
+      const network = await sessionNetworkConfig(workspaceId, session.id)
+      const resolved = await resolveRuntimeEnvironment(network)
+      const snapshot = await supervisor.selectSession(
+        workspace.path,
+        resolved.env,
+        approvalMode,
+        session.id,
+        session.path
+      )
+      await stateStore.setActiveSession(workspaceId, session.id)
+      return supervisor.setApprovalState(
+        approvalMode,
+        false,
+        snapshot.approvalModeSaved !== false
+      )
+    }
     if (
       supervisor.snapshot.status !== 'ready' ||
       supervisor.snapshot.approvalMode !== approvalMode
@@ -846,7 +1015,13 @@ export function registerRuntimeIpc(
           }
         }
         try {
-          if (
+          if (activeSession && supervisor.supportsParallelSessions) {
+            await switchRuntimeSession(
+              workspace.id,
+              activeSession,
+              approvalMode
+            )
+          } else if (
             supervisor.snapshot.status === 'ready' &&
             supervisor.snapshot.workspacePath === workspace.path &&
             supervisor.snapshot.approvalMode === approvalMode
@@ -874,7 +1049,7 @@ export function registerRuntimeIpc(
           return
         }
 
-        if (activeSession) {
+        if (activeSession && !supervisor.supportsParallelSessions) {
           try {
             supervisor.trustSession(activeSession.id, activeSession.path)
             await supervisor.switchSession(activeSession.id)
@@ -919,9 +1094,17 @@ export function registerRuntimeIpc(
       const url = new URL(event['url'])
       if (url.protocol !== 'omp-session:')
         throw new Error('Host URI scheme 不支持')
-      const workspace = activeWorkspace()
-      if (url.hostname !== workspace.id)
-        throw new Error('只能读取当前 Workspace 的 Session')
+      const workspace = requireWorkspace(url.hostname)
+      const routing = event['__desktop']
+      const eventWorkspacePath =
+        routing && typeof routing === 'object' && !Array.isArray(routing)
+          ? (routing as { workspacePath?: unknown }).workspacePath
+          : undefined
+      if (
+        typeof eventWorkspacePath === 'string' &&
+        eventWorkspacePath !== workspace.path
+      )
+        throw new Error('只能读取所属 Workspace 的 Session')
       const sessionId = decodeURIComponent(url.pathname.replace(/^\/+/u, ''))
       const { session } = await requireSession(workspace.id, sessionId)
       const cursorText = url.searchParams.get('cursor')
@@ -1026,8 +1209,15 @@ export function registerRuntimeIpc(
     for (const id of pendingExtensionUi.keys()) deletePendingExtensionUi(id)
   }
 
-  const cancelPendingExtensionUi = (): void => {
+  const cancelPendingExtensionUi = (scope?: {
+    runtimeInstanceId: string
+    generation: number
+  }): void => {
+    const prefix = scope
+      ? `${scope.runtimeInstanceId}:${scope.generation}:`
+      : undefined
     for (const id of pendingExtensionUi.keys()) {
+      if (prefix && !id.startsWith(prefix)) continue
       try {
         supervisor.sendFrame({
           type: 'extension_ui_response',
@@ -1040,7 +1230,8 @@ export function registerRuntimeIpc(
       deletePendingExtensionUi(id)
     }
     if (toolApprovals.size > 0) {
-      for (const item of toolApprovals.values()) {
+      for (const [id, item] of toolApprovals) {
+        if (prefix && !id.startsWith(prefix)) continue
         if (item.request.status !== 'pending') continue
         try {
           supervisor.sendFrame({
@@ -1052,12 +1243,48 @@ export function registerRuntimeIpc(
           // Runtime 已退出时只需清理宿主侧等待项。
         }
         item.request.status = 'cancelled'
+        toolApprovals.delete(id)
       }
-      clearToolApprovals()
+      if (prefix) publishToolApprovals()
+      else clearToolApprovals()
     }
   }
 
   const onOmpEvent = (event: OmpEvent): void => {
+    const routing = event['__desktop']
+    const eventRuntimeVersion =
+      routing && typeof routing === 'object' && !Array.isArray(routing)
+        ? (routing as { runtimeVersion?: unknown }).runtimeVersion
+        : undefined
+    const runtimeVersion =
+      typeof eventRuntimeVersion === 'string'
+        ? eventRuntimeVersion
+        : supervisor.snapshot.runtimeVersion
+    if (event.type === 'agent_end') {
+      const eventSessionId =
+        routing && typeof routing === 'object' && !Array.isArray(routing)
+          ? (routing as { sessionId?: unknown }).sessionId
+          : undefined
+      const eventWorkspacePath =
+        routing && typeof routing === 'object' && !Array.isArray(routing)
+          ? (routing as { workspacePath?: unknown }).workspacePath
+          : undefined
+      if (
+        typeof eventSessionId === 'string' &&
+        typeof eventWorkspacePath === 'string' &&
+        eventSessionId !== supervisor.snapshot.sessionId
+      ) {
+        const workspace = stateStore.state.workspaces.find(
+          (item) => item.path === eventWorkspacePath
+        )
+        if (workspace)
+          void stateStore
+            .updateSessionPreference(workspace.id, eventSessionId, {
+              unreadCompletion: true
+            })
+            .catch((error: unknown) => log.warn('保存后台完成状态失败', error))
+      }
+    }
     if (event.type === 'host_tool_call' && typeof event['id'] === 'string') {
       supervisor.sendFrame({
         type: 'host_tool_result',
@@ -1079,13 +1306,13 @@ export function registerRuntimeIpc(
       typeof event['id'] === 'string'
     ) {
       const method = event['method']
-      if (isToolApprovalRequest(event, supervisor.snapshot.runtimeVersion)) {
+      if (isToolApprovalRequest(event, runtimeVersion)) {
         registerToolApproval(event)
         return
       }
       if (
         isToolApprovalRequest(event, '17.0.6') &&
-        supervisor.snapshot.runtimeVersion !== '17.0.6' &&
+        runtimeVersion !== '17.0.6' &&
         !compatibilityNoticeShown
       ) {
         compatibilityNoticeShown = true
@@ -1093,7 +1320,7 @@ export function registerRuntimeIpc(
           '当前 OMP 版本未验证，权限确认使用兼容模式'
         )
         supervisor.recordDiagnostic(
-          `工具审批使用兼容模式: version=${supervisor.snapshot.runtimeVersion ?? 'unknown'}`
+          `工具审批使用兼容模式: version=${runtimeVersion ?? 'unknown'}`
         )
       }
       if (method === 'open_url') {
@@ -1191,6 +1418,14 @@ export function registerRuntimeIpc(
             providerId: activeLoginProviderId ?? undefined,
             input: {
               id: requestId,
+              ...(routing &&
+              typeof routing === 'object' &&
+              !Array.isArray(routing) &&
+              typeof (routing as { sessionId?: unknown }).sessionId === 'string'
+                ? {
+                    sessionId: (routing as { sessionId: string }).sessionId
+                  }
+                : {}),
               message:
                 sanitizeLoginText(event['message'], 240) ?? '请输入授权信息',
               placeholder: sanitizeLoginText(event['placeholder'], 120)
@@ -1229,6 +1464,10 @@ export function registerRuntimeIpc(
   }
 
   supervisor.on('snapshot', onSnapshot)
+  supervisor.on('session-snapshot', onSessionSnapshot)
+  supervisor.on('pool-snapshot', onPoolSnapshot)
+  supervisor.on('temporary-session-bound', onTemporarySessionBound)
+  supervisor.on('temporary-session-failed', onTemporarySessionFailed)
   supervisor.on('event', onOmpEvent)
   supervisor.on('before-stop', cancelPendingExtensionUi)
 
@@ -1247,7 +1486,10 @@ export function registerRuntimeIpc(
       const workspacePath = result.filePaths[0]
       if (result.canceled || !workspacePath) return success(null)
       const selectedAt = performance.now()
-      if (workspacePath !== supervisor.snapshot.workspacePath)
+      if (
+        workspacePath !== supervisor.snapshot.workspacePath &&
+        !supervisor.supportsParallelSessions
+      )
         assertSwitchAllowed()
       const workspace = await stateStore.addWorkspace(workspacePath)
       const snapshot: RuntimeSnapshot =
@@ -1300,7 +1542,10 @@ export function registerRuntimeIpc(
       try {
         assertTrustedSender(event, getWindow, developmentUrl)
         const workspace = requireWorkspace(workspaceId)
-        if (workspace.path !== supervisor.snapshot.workspacePath)
+        if (
+          workspace.path !== supervisor.snapshot.workspacePath &&
+          !supervisor.supportsParallelSessions
+        )
           assertSwitchAllowed()
         await stateStore.activateWorkspace(workspace.id)
         const snapshot =
@@ -1590,6 +1835,26 @@ export function registerRuntimeIpc(
     }
   })
 
+  ipcMain.handle(
+    IPC_CHANNELS.getSessionMessages,
+    async (event, sessionId: unknown) => {
+      try {
+        assertTrustedSender(event, getWindow, developmentUrl)
+        if (typeof sessionId !== 'string')
+          throw new RuntimeFailure('INVALID_ARGUMENT', 'Session ID 无效', false)
+        if (!supervisor.getSessionMessages)
+          throw new RuntimeFailure(
+            'UNSUPPORTED',
+            '当前不支持后台历史恢复',
+            false
+          )
+        return success(await supervisor.getSessionMessages(sessionId))
+      } catch (error) {
+        return failure(error)
+      }
+    }
+  )
+
   ipcMain.handle(IPC_CHANNELS.getAvailableCommands, async (event) => {
     try {
       assertTrustedSender(event, getWindow, developmentUrl)
@@ -1645,6 +1910,16 @@ export function registerRuntimeIpc(
             true
           )
         }
+        if (
+          supervisor.snapshot.isStreaming ||
+          supervisor.snapshot.queuedMessageCount > 0 ||
+          supervisor.snapshot.isAuthenticating
+        )
+          throw new RuntimeFailure(
+            'RUNTIME_NOT_READY',
+            'Provider 登录只能在当前 Session 空闲时开始',
+            true
+          )
         activeLoginProviderId = providerId
         loginCancellationRequested = false
         loginInputTimedOut = false
@@ -1736,7 +2011,11 @@ export function registerRuntimeIpc(
         ),
         delay(5_000).then(() => false)
       ])
-      if (!settled) await supervisor.restart()
+      if (!settled) {
+        if (supervisor.restartLoginRuntime)
+          await supervisor.restartLoginRuntime()
+        else await supervisor.restart()
+      }
       setProviderLoginState({ status: 'idle' })
       providerLoginUrl = null
       return success(undefined)
@@ -1785,9 +2064,12 @@ export function registerRuntimeIpc(
   ipcMain.handle(IPC_CHANNELS.getRuntimeNetwork, async (event) => {
     try {
       assertTrustedSender(event, getWindow, developmentUrl)
-      const resolved = await environmentResolver.resolve(
-        stateStore.runtimeNetworkConfig()
-      )
+      const workspace = activeWorkspace()
+      const sessionId = supervisor.snapshot.sessionId
+      const config = sessionId
+        ? await sessionNetworkConfig(workspace.id, sessionId)
+        : stateStore.runtimeNetworkConfig()
+      const resolved = await environmentResolver.resolve(config)
       return success(resolved.network)
     } catch (error) {
       return failure(error)
@@ -1801,8 +2083,13 @@ export function registerRuntimeIpc(
         assertTrustedSender(event, getWindow, developmentUrl)
         assertNetworkChangeAllowed()
         const config = validateNetworkConfig(value)
-        await stateStore.setRuntimeNetworkConfig(config)
-        const resolved = await resolveRuntimeEnvironment()
+        const workspace = activeWorkspace()
+        const sessionId = supervisor.snapshot.sessionId
+        if (sessionId)
+          await stateStore.updateSessionPreference(workspace.id, sessionId, {
+            network: config
+          })
+        const resolved = await resolveRuntimeEnvironment(config)
         if (supervisor.snapshot.workspacePath) {
           await supervisor.restart(undefined, resolved.env)
         }
@@ -1817,8 +2104,12 @@ export function registerRuntimeIpc(
     try {
       assertTrustedSender(event, getWindow, developmentUrl)
       assertNetworkChangeAllowed()
-      const config = stateStore.runtimeNetworkConfig()
-      const resolved = await resolveRuntimeEnvironment()
+      const workspace = activeWorkspace()
+      const sessionId = supervisor.snapshot.sessionId
+      const config = sessionId
+        ? await sessionNetworkConfig(workspace.id, sessionId)
+        : stateStore.runtimeNetworkConfig()
+      const resolved = await resolveRuntimeEnvironment(config)
       if (config.mode === 'auto' && supervisor.snapshot.workspacePath)
         await supervisor.restart(undefined, resolved.env)
       return success(resolved.network)
@@ -1850,14 +2141,77 @@ export function registerRuntimeIpc(
     }
   )
 
+  ipcMain.handle(IPC_CHANNELS.getRuntimeSettings, async (event) => {
+    try {
+      assertTrustedSender(event, getWindow, developmentUrl)
+      const states = supervisor.states ?? []
+      return success({
+        defaultNetwork: stateStore.runtimeNetworkConfig(),
+        maxParallelSessions: stateStore.maxParallelSessions(),
+        runningSessions: states.filter((state) => state.phase !== 'idle')
+          .length,
+        waitingSessions: supervisor.waitingCount ?? 0
+      })
+    } catch (error) {
+      return failure(error)
+    }
+  })
+
+  ipcMain.handle(
+    IPC_CHANNELS.applyRuntimeSettings,
+    async (event, value: unknown) => {
+      try {
+        assertTrustedSender(event, getWindow, developmentUrl)
+        if (!value || typeof value !== 'object' || Array.isArray(value))
+          throw new RuntimeFailure(
+            'INVALID_ARGUMENT',
+            'Runtime 设置无效',
+            false
+          )
+        const record = value as Record<string, unknown>
+        const maxParallelSessions = record['maxParallelSessions']
+        if (
+          typeof maxParallelSessions !== 'number' ||
+          !Number.isInteger(maxParallelSessions) ||
+          maxParallelSessions < 1 ||
+          maxParallelSessions > 10
+        )
+          throw new RuntimeFailure(
+            'INVALID_ARGUMENT',
+            '最大并行数量必须是 1–10 的整数',
+            false
+          )
+        const defaultNetwork = validateNetworkConfig(record['defaultNetwork'])
+        await stateStore.setRuntimeNetworkConfig(defaultNetwork)
+        await stateStore.setMaxParallelSessions(maxParallelSessions)
+        supervisor.setMaxParallel?.(maxParallelSessions)
+        const states = supervisor.states ?? []
+        return success({
+          defaultNetwork,
+          maxParallelSessions,
+          runningSessions: states.filter((state) => state.phase !== 'idle')
+            .length,
+          waitingSessions: supervisor.waitingCount ?? 0
+        })
+      } catch (error) {
+        return failure(error)
+      }
+    }
+  )
+
   ipcMain.handle(
     IPC_CHANNELS.getRuntimeEnvironmentDiagnostic,
     async (event) => {
       try {
         assertTrustedSender(event, getWindow, developmentUrl)
+        const workspace = activeWorkspace()
+        const sessionId = supervisor.snapshot.sessionId
+        const config = sessionId
+          ? await sessionNetworkConfig(workspace.id, sessionId)
+          : stateStore.runtimeNetworkConfig()
         return success(
           await environmentResolver.diagnostic(
-            stateStore.runtimeNetworkConfig(),
+            config,
             supervisor.snapshot.workspacePath
           )
         )
@@ -1867,43 +2221,75 @@ export function registerRuntimeIpc(
     }
   )
 
-  ipcMain.handle(IPC_CHANNELS.prompt, async (event, value: unknown) => {
-    try {
-      assertTrustedSender(event, getWindow, developmentUrl)
-      await supervisor.prompt(
-        await materializePrompt(validatePromptInput(value))
-      )
-      return success(undefined)
-    } catch (error) {
-      return failure(error)
+  ipcMain.handle(
+    IPC_CHANNELS.prompt,
+    async (event, target: unknown, value: unknown) => {
+      try {
+        assertTrustedSender(event, getWindow, developmentUrl)
+        const sessionId = await requireTargetSessionId(target)
+        await supervisor.prompt(
+          await materializePrompt(validatePromptInput(value)),
+          sessionId
+        )
+        return success(undefined)
+      } catch (error) {
+        return failure(error)
+      }
     }
-  })
+  )
 
-  ipcMain.handle(IPC_CHANNELS.followUp, async (event, value: unknown) => {
-    try {
-      assertTrustedSender(event, getWindow, developmentUrl)
-      await supervisor.followUp(
-        await materializePrompt(validatePromptInput(value))
-      )
-      return success(undefined)
-    } catch (error) {
-      return failure(error)
+  ipcMain.handle(
+    IPC_CHANNELS.followUp,
+    async (event, target: unknown, value: unknown) => {
+      try {
+        assertTrustedSender(event, getWindow, developmentUrl)
+        const sessionId = await requireTargetSessionId(target)
+        await supervisor.followUp(
+          await materializePrompt(validatePromptInput(value)),
+          sessionId
+        )
+        return success(undefined)
+      } catch (error) {
+        return failure(error)
+      }
     }
-  })
+  )
 
-  ipcMain.handle(IPC_CHANNELS.stopCurrentRun, async (event) => {
-    try {
-      assertTrustedSender(event, getWindow, developmentUrl)
-      return success(await supervisor.stopCurrentRun())
-    } catch (error) {
-      return failure(error)
+  ipcMain.handle(
+    IPC_CHANNELS.stopCurrentRun,
+    async (event, target: unknown) => {
+      try {
+        assertTrustedSender(event, getWindow, developmentUrl)
+        const sessionId = await requireTargetSessionId(target)
+        return success(await supervisor.stopCurrentRun(sessionId))
+      } catch (error) {
+        return failure(error)
+      }
     }
-  })
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.stopSession,
+    async (event, sessionId: unknown) => {
+      try {
+        assertTrustedSender(event, getWindow, developmentUrl)
+        if (typeof sessionId !== 'string')
+          throw new RuntimeFailure('INVALID_ARGUMENT', 'Session ID 无效', false)
+        const workspace = activeWorkspace()
+        await requireSession(workspace.id, sessionId)
+        if (!supervisor.stopSession)
+          throw new RuntimeFailure('UNSUPPORTED', '当前不支持后台停止', false)
+        return success(await supervisor.stopSession(sessionId))
+      } catch (error) {
+        return failure(error)
+      }
+    }
+  )
 
   ipcMain.handle(IPC_CHANNELS.newSession, async (event) => {
     try {
       assertTrustedSender(event, getWindow, developmentUrl)
-      assertSwitchAllowed()
+      if (!supervisor.supportsParallelSessions) assertSwitchAllowed()
       return success(await supervisor.newSession())
     } catch (error) {
       return failure(error)
@@ -1920,14 +2306,40 @@ export function registerRuntimeIpc(
     ) => {
       try {
         assertTrustedSender(event, getWindow, developmentUrl)
-        assertSwitchAllowed()
+        if (!supervisor.supportsParallelSessions) assertSwitchAllowed()
         const rawInput = validatePromptInput(value)
         const input = await materializePrompt(rawInput)
         const title =
           typeof titleValue === 'string' ? titleValue.trim() : rawInput.message
         const workspace = activeWorkspace()
         const approvalMode = validateApprovalMode(approvalModeValue)
-        if (
+        const network = stateStore.runtimeNetworkConfig()
+        if (supervisor.enqueueNewSession) {
+          const resolved = await resolveRuntimeEnvironment(network)
+          const queued = supervisor.enqueueNewSession({
+            workspacePath: workspace.path,
+            env: resolved.env,
+            approvalMode,
+            input,
+            title: title || '图片会话'
+          })
+          queuedSessionPreferences.set(queued.temporarySessionId, {
+            workspaceId: workspace.id,
+            approvalMode,
+            network,
+            input: rawInput
+          })
+          return success(queued)
+        }
+        if (supervisor.prepareNewSession) {
+          const resolved = await resolveRuntimeEnvironment(network)
+          await supervisor.prepareNewSession(
+            workspace.path,
+            resolved.env,
+            approvalMode,
+            Buffer.byteLength(JSON.stringify(input), 'utf8')
+          )
+        } else if (
           supervisor.snapshot.status !== 'ready' ||
           supervisor.snapshot.approvalMode !== approvalMode
         ) {
@@ -1953,7 +2365,7 @@ export function registerRuntimeIpc(
           await stateStore.updateSessionPreference(
             workspace.id,
             snapshot.sessionId,
-            { approvalMode }
+            { approvalMode, network }
           )
           await stateStore.setActiveSession(workspace.id, snapshot.sessionId)
         } catch {
@@ -1984,6 +2396,61 @@ export function registerRuntimeIpc(
   )
 
   ipcMain.handle(
+    IPC_CHANNELS.cancelQueuedSession,
+    async (event, temporarySessionId: unknown) => {
+      try {
+        assertTrustedSender(event, getWindow, developmentUrl)
+        if (typeof temporarySessionId !== 'string')
+          throw new RuntimeFailure(
+            'INVALID_ARGUMENT',
+            'Temporary Session ID 无效',
+            false
+          )
+        if (!supervisor.cancelQueuedSession)
+          throw new RuntimeFailure('UNSUPPORTED', '当前没有等待队列', false)
+        const input = await supervisor.cancelQueuedSession(temporarySessionId)
+        const preference = queuedSessionPreferences.get(temporarySessionId)
+        queuedSessionPreferences.delete(temporarySessionId)
+        const restoredInput = preference?.input ?? input
+        send({
+          type: 'temporary-session-failed',
+          temporarySessionId,
+          input: restoredInput,
+          error: {
+            code: 'RUNTIME_NOT_READY',
+            message: '已取消等待',
+            retryable: false
+          },
+          reason: 'cancelled'
+        })
+        return success(restoredInput)
+      } catch (error) {
+        return failure(error)
+      }
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.selectTemporarySession,
+    async (event, temporarySessionId: unknown) => {
+      try {
+        assertTrustedSender(event, getWindow, developmentUrl)
+        if (typeof temporarySessionId !== 'string')
+          throw new RuntimeFailure(
+            'INVALID_ARGUMENT',
+            'Temporary Session ID 无效',
+            false
+          )
+        if (!supervisor.selectTemporarySession)
+          throw new RuntimeFailure('UNSUPPORTED', '当前没有临时 Session', false)
+        return success(supervisor.selectTemporarySession(temporarySessionId))
+      } catch (error) {
+        return failure(error)
+      }
+    }
+  )
+
+  ipcMain.handle(
     IPC_CHANNELS.switchSession,
     async (event, sessionId: unknown) => {
       try {
@@ -1991,7 +2458,7 @@ export function registerRuntimeIpc(
         if (typeof sessionId !== 'string') {
           throw new RuntimeFailure('INVALID_ARGUMENT', 'Session ID 无效', false)
         }
-        assertSwitchAllowed()
+        if (!supervisor.supportsParallelSessions) assertSwitchAllowed()
         const workspace = activeWorkspace()
         const { session } = await requireSession(workspace.id, sessionId)
         const approvalMode = await sessionApprovalMode(workspace.id, session.id)
@@ -2009,31 +2476,24 @@ export function registerRuntimeIpc(
 
   ipcMain.handle(
     IPC_CHANNELS.setApprovalMode,
-    async (event, value: unknown) => {
+    async (event, target: unknown, value: unknown) => {
       try {
         assertTrustedSender(event, getWindow, developmentUrl)
-        assertSwitchAllowed()
+        const sessionId = await requireTargetSessionId(target)
+        assertTargetSwitchAllowed(sessionId)
         const approvalMode = validateApprovalMode(value)
         const workspace = activeWorkspace()
-        const sessionId = supervisor.snapshot.sessionId
-        if (!sessionId) {
-          throw new RuntimeFailure(
-            'SESSION_NOT_FOUND',
-            '尚未选择 Session',
-            false
-          )
-        }
         const { session } = await requireSession(workspace.id, sessionId)
         const previousMode = await sessionApprovalMode(workspace.id, session.id)
         if (approvalMode === previousMode) return success(supervisor.snapshot)
 
-        supervisor.setApprovalState(approvalMode, true)
+        supervisor.setApprovalState(approvalMode, true, true, sessionId)
         try {
-          await supervisor.restart(approvalMode)
+          await supervisor.restart(approvalMode, undefined, sessionId)
         } catch (error) {
           try {
-            supervisor.setApprovalState(previousMode, true)
-            await supervisor.restart(previousMode)
+            supervisor.setApprovalState(previousMode, true, true, sessionId)
+            await supervisor.restart(previousMode, undefined, sessionId)
           } catch {
             throw error
           }
@@ -2054,41 +2514,52 @@ export function registerRuntimeIpc(
             approvalMode
           })
         } catch {
-          supervisor.setApprovalState(approvalMode, false, false)
+          supervisor.setApprovalState(approvalMode, false, false, sessionId)
           throw new RuntimeFailure('STATE_WRITE_FAILED', '权限保存失败', true)
         }
-        return success(supervisor.setApprovalState(approvalMode, false))
+        return success(
+          supervisor.setApprovalState(approvalMode, false, true, sessionId)
+        )
       } catch (error) {
         return failure(error)
       }
     }
   )
 
-  ipcMain.handle(IPC_CHANNELS.selectModel, async (event, value: unknown) => {
-    try {
-      assertTrustedSender(event, getWindow, developmentUrl)
-      return success(
-        await supervisor.selectModel(validateModelSelection(value))
-      )
-    } catch (error) {
-      return failure(error)
+  ipcMain.handle(
+    IPC_CHANNELS.selectModel,
+    async (event, target: unknown, value: unknown) => {
+      try {
+        assertTrustedSender(event, getWindow, developmentUrl)
+        const sessionId = await requireTargetSessionId(target)
+        return success(
+          await supervisor.selectModel(validateModelSelection(value), sessionId)
+        )
+      } catch (error) {
+        return failure(error)
+      }
     }
-  })
+  )
 
-  ipcMain.handle(IPC_CHANNELS.cancelPendingModelSelection, async (event) => {
-    try {
-      assertTrustedSender(event, getWindow, developmentUrl)
-      return success(supervisor.cancelPendingModelSelection())
-    } catch (error) {
-      return failure(error)
+  ipcMain.handle(
+    IPC_CHANNELS.cancelPendingModelSelection,
+    async (event, target: unknown) => {
+      try {
+        assertTrustedSender(event, getWindow, developmentUrl)
+        const sessionId = await requireTargetSessionId(target)
+        return success(supervisor.cancelPendingModelSelection(sessionId))
+      } catch (error) {
+        return failure(error)
+      }
     }
-  })
+  )
 
   ipcMain.handle(
     IPC_CHANNELS.setThinkingLevel,
-    async (event, level: unknown) => {
+    async (event, target: unknown, level: unknown) => {
       try {
         assertTrustedSender(event, getWindow, developmentUrl)
+        const sessionId = await requireTargetSessionId(target)
         if (typeof level !== 'string') {
           throw new RuntimeFailure(
             'INVALID_ARGUMENT',
@@ -2096,7 +2567,7 @@ export function registerRuntimeIpc(
             false
           )
         }
-        await supervisor.setThinkingLevel(level)
+        await supervisor.setThinkingLevel(level, sessionId)
         return success(undefined)
       } catch (error) {
         return failure(error)
@@ -2106,9 +2577,29 @@ export function registerRuntimeIpc(
 
   ipcMain.handle(
     IPC_CHANNELS.respondExtensionUi,
-    async (event, id: unknown, response: unknown) => {
+    async (event, target: unknown, id: unknown, response: unknown) => {
       try {
         assertTrustedSender(event, getWindow, developmentUrl)
+        const sessionId =
+          target === null && activeLoginTask
+            ? undefined
+            : await requireTargetSessionId(target)
+        const pendingEvent =
+          typeof id === 'string'
+            ? (toolApprovals.get(id)?.event ??
+              pendingExtensionUi.get(id)?.event)
+            : undefined
+        const routing = pendingEvent?.['__desktop']
+        const ownerSessionId =
+          routing && typeof routing === 'object' && !Array.isArray(routing)
+            ? (routing as { sessionId?: unknown }).sessionId
+            : undefined
+        if (typeof ownerSessionId === 'string' && ownerSessionId !== sessionId)
+          throw new RuntimeFailure(
+            'INVALID_ARGUMENT',
+            '交互请求不属于目标 Session',
+            false
+          )
         if (
           typeof id === 'string' &&
           toolApprovals.has(id) &&
@@ -2142,7 +2633,16 @@ export function registerRuntimeIpc(
             false
           )
         }
-        supervisor.sendFrame({ type: 'extension_ui_response', id, ...response })
+        if (!sessionId && !activeLoginTask)
+          throw new RuntimeFailure(
+            'INVALID_ARGUMENT',
+            'Extension UI 缺少目标 Session',
+            false
+          )
+        supervisor.sendFrame(
+          { type: 'extension_ui_response', id, ...response },
+          sessionId
+        )
         deletePendingExtensionUi(id)
         send({
           type: 'omp-event',
@@ -2200,6 +2700,8 @@ export function registerRuntimeIpc(
   })
 
   const replayPending = (): void => {
+    if (supervisor.states)
+      send({ type: 'pool-snapshot', states: supervisor.states })
     if (providerLoginState.status !== 'idle') {
       send({ type: 'provider-login', state: providerLoginState })
     }
@@ -2219,6 +2721,10 @@ export function registerRuntimeIpc(
   return () => {
     flushEventBatch()
     supervisor.off('snapshot', onSnapshot)
+    supervisor.off('session-snapshot', onSessionSnapshot)
+    supervisor.off('pool-snapshot', onPoolSnapshot)
+    supervisor.off('temporary-session-bound', onTemporarySessionBound)
+    supervisor.off('temporary-session-failed', onTemporarySessionFailed)
     supervisor.off('event', onOmpEvent)
     supervisor.off('before-stop', cancelPendingExtensionUi)
     clearPendingExtensionUi()

@@ -112,15 +112,18 @@ const desktopApi: DesktopApi = {
       workspaceId,
       references
     ),
-  cancelPendingModelSelection: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.cancelPendingModelSelection),
+  cancelPendingModelSelection: (sessionId) =>
+    ipcRenderer.invoke(IPC_CHANNELS.cancelPendingModelSelection, sessionId),
   cancelProviderLogin: () =>
     ipcRenderer.invoke(IPC_CHANNELS.cancelProviderLogin),
-  followUp: (input) => ipcRenderer.invoke(IPC_CHANNELS.followUp, input),
+  followUp: (sessionId, input) =>
+    ipcRenderer.invoke(IPC_CHANNELS.followUp, sessionId, input),
   getAvailableCommands: () =>
     ipcRenderer.invoke(IPC_CHANNELS.getAvailableCommands),
   getRuntimeState: () => ipcRenderer.invoke(IPC_CHANNELS.getRuntimeState),
   getMessages: () => ipcRenderer.invoke(IPC_CHANNELS.getMessages),
+  getSessionMessages: (sessionId) =>
+    ipcRenderer.invoke(IPC_CHANNELS.getSessionMessages, sessionId),
   getLoginProviders: () => ipcRenderer.invoke(IPC_CHANNELS.getLoginProviders),
   getAvailableModels: () => ipcRenderer.invoke(IPC_CHANNELS.getAvailableModels),
   getProviderLoginState: () =>
@@ -130,6 +133,10 @@ const desktopApi: DesktopApi = {
   newSession: () => ipcRenderer.invoke(IPC_CHANNELS.newSession),
   createSession: (input, title, approvalMode) =>
     ipcRenderer.invoke(IPC_CHANNELS.createSession, input, title, approvalMode),
+  cancelQueuedSession: (temporarySessionId) =>
+    ipcRenderer.invoke(IPC_CHANNELS.cancelQueuedSession, temporarySessionId),
+  selectTemporarySession: (temporarySessionId) =>
+    ipcRenderer.invoke(IPC_CHANNELS.selectTemporarySession, temporarySessionId),
   openRuntimeLog: () => ipcRenderer.invoke(IPC_CHANNELS.openRuntimeLog),
   openExternal: (url) =>
     ipcRenderer.invoke(IPC_CHANNELS.openExternal, url) as Promise<boolean>,
@@ -139,11 +146,15 @@ const desktopApi: DesktopApi = {
     ipcRenderer.on(IPC_CHANNELS.event, handler)
     return () => ipcRenderer.removeListener(IPC_CHANNELS.event, handler)
   },
-  prompt: (input) => ipcRenderer.invoke(IPC_CHANNELS.prompt, input),
+  prompt: (sessionId, input) =>
+    ipcRenderer.invoke(IPC_CHANNELS.prompt, sessionId, input),
   restartRuntime: () => ipcRenderer.invoke(IPC_CHANNELS.restartRuntime),
   getRuntimeNetwork: () => ipcRenderer.invoke(IPC_CHANNELS.getRuntimeNetwork),
   applyRuntimeNetwork: (config) =>
     ipcRenderer.invoke(IPC_CHANNELS.applyRuntimeNetwork, config),
+  getRuntimeSettings: () => ipcRenderer.invoke(IPC_CHANNELS.getRuntimeSettings),
+  applyRuntimeSettings: (settings) =>
+    ipcRenderer.invoke(IPC_CHANNELS.applyRuntimeSettings, settings),
   detectRuntimeProxy: () => ipcRenderer.invoke(IPC_CHANNELS.detectRuntimeProxy),
   checkRuntimeProxyPort: (port) =>
     ipcRenderer.invoke(IPC_CHANNELS.checkRuntimeProxyPort, port),
@@ -151,18 +162,30 @@ const desktopApi: DesktopApi = {
     ipcRenderer.invoke(IPC_CHANNELS.getRuntimeEnvironmentDiagnostic),
   reopenProviderLoginUrl: () =>
     ipcRenderer.invoke(IPC_CHANNELS.reopenProviderLoginUrl),
-  respondExtensionUi: (id: string, response: ExtensionUiResponse) =>
-    ipcRenderer.invoke(IPC_CHANNELS.respondExtensionUi, id, response),
+  respondExtensionUi: (
+    sessionId: string | null,
+    id: string,
+    response: ExtensionUiResponse
+  ) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.respondExtensionUi,
+      sessionId,
+      id,
+      response
+    ),
   revealPath: (path) => ipcRenderer.invoke(IPC_CHANNELS.revealPath, path),
   validateLocalPath: (path) =>
     ipcRenderer.invoke(IPC_CHANNELS.validateLocalPath, path),
-  selectModel: (selection) =>
-    ipcRenderer.invoke(IPC_CHANNELS.selectModel, selection),
-  setThinkingLevel: (level) =>
-    ipcRenderer.invoke(IPC_CHANNELS.setThinkingLevel, level),
-  setApprovalMode: (approvalMode) =>
-    ipcRenderer.invoke(IPC_CHANNELS.setApprovalMode, approvalMode),
-  stopCurrentRun: () => ipcRenderer.invoke(IPC_CHANNELS.stopCurrentRun),
+  selectModel: (sessionId, selection) =>
+    ipcRenderer.invoke(IPC_CHANNELS.selectModel, sessionId, selection),
+  setThinkingLevel: (sessionId, level) =>
+    ipcRenderer.invoke(IPC_CHANNELS.setThinkingLevel, sessionId, level),
+  setApprovalMode: (sessionId, approvalMode) =>
+    ipcRenderer.invoke(IPC_CHANNELS.setApprovalMode, sessionId, approvalMode),
+  stopCurrentRun: (sessionId) =>
+    ipcRenderer.invoke(IPC_CHANNELS.stopCurrentRun, sessionId),
+  stopSession: (sessionId) =>
+    ipcRenderer.invoke(IPC_CHANNELS.stopSession, sessionId),
   switchSession: (sessionId) =>
     ipcRenderer.invoke(IPC_CHANNELS.switchSession, sessionId),
   log: (entry: RendererLogEntry) => ipcRenderer.send(IPC_CHANNELS.log, entry),

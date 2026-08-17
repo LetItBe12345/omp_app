@@ -131,6 +131,18 @@ export function RuntimeNetworkControl({
     } else setMessage(result.error.message)
   }
 
+  const copyDefault = async (): Promise<void> => {
+    setWorking(true)
+    setMessage(null)
+    const result = await window.desktop.getRuntimeSettings()
+    if (!result.ok) {
+      setWorking(false)
+      setMessage(result.error.message)
+      return
+    }
+    await apply(result.data.defaultNetwork)
+  }
+
   const showDiagnostic = async (): Promise<void> => {
     setWorking(true)
     const result = await window.desktop.getRuntimeEnvironmentDiagnostic()
@@ -244,6 +256,15 @@ export function RuntimeNetworkControl({
                   )}
                   <p>关闭只移除代理变量，不影响系统 TUN 或路由。</p>
                 </div>
+                <button
+                  className="command-item w-full border-t border-[var(--border-subtle)]"
+                  disabled={working}
+                  onClick={() => void copyDefault()}
+                  type="button"
+                >
+                  <Copy size={14} />
+                  改为当前默认值
+                </button>
                 <button
                   className="command-item w-full border-t border-[var(--border-subtle)]"
                   disabled={working}

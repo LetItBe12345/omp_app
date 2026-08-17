@@ -75,7 +75,7 @@ Workspace 行悬停或键盘聚焦时，以小字号提示显示绝对路径。S
 
 MVP 的一个活动 Workspace 只有一个长期运行的 OMP Runtime。同一时间只有当前 Session 可以生成。同一 Workspace 内通过 `new_session` 或 `switch_session` 顺序切换；权限变化时保持 Workspace 的 `cwd` 重启 Runtime。跨 Workspace 必须使用目标 Workspace 的 `--cwd` 启动新 Runtime。
 
-多 Session 并行属于 MVP 之后的能力。届时一个正在生成的 Session 对应一个 OMP Runtime，并由 Settings 限制最大并行数量；闲置 Session 不长期占用进程。
+多 Session 并行属于 MVP 之后的能力。届时一个正在生成的 Session 对应一个 OMP Runtime。Settings 的最大并行数量默认为 5，可设为 1–10。达到上限后按全局 FIFO 排队；闲置 Runtime 只短时保温，不长期占用进程。Session 行用不同图标区分排队、执行、等待交互和失败，不在会话列表中写状态文字。
 
 ## 4. `@` 引用
 
@@ -180,7 +180,7 @@ MVP 只注册一个只读 Host URI：`omp-session://<workspace-id>/<session-id>`
 
 MVP 的单个 OMP Runtime 只能持有一个当前 AgentSession。Desktop 可管理多个 Session，但同一时间只允许当前 Session 生成。
 
-MVP 之后可建立 Runtime 池：每个正在生成的 Session 使用独立 OMP RPC 进程，Settings 提供最大并行数量，达到上限时排队或提示用户处理。闲置 Session 只保留 Session 文件，不长期占用进程。
+MVP 之后建立 Runtime 池：每个正在生成的 Session 使用独立 OMP RPC 进程，请求和事件按 Workspace ID、Session ID、Runtime Instance ID 和 generation 隔离。当前可见 Session 与正在执行的 Session 解耦，切换界面不停止后台任务。最大并行数量和队列规则见 Phase 2.5。
 
 参考：
 
@@ -260,6 +260,8 @@ Electron Main 在启动 `omp --mode rpc` 时，合并 Runtime Environment Profil
 RPC 只负责传输命令和事件。Agent 的 Bash Tool 由 OMP Runtime 实际执行，其子进程默认继承 Runtime 的 PATH、普通环境变量和代理变量。
 
 修改 Runtime Environment Profile 或 Runtime Network Profile 后，Desktop 必须重启 OMP Runtime，再恢复当前 Session。
+
+多 Runtime 阶段将网络配置调整为“新会话全局默认值 + Session 独立配置”。新 Session 在首条 Prompt 形成正式 Session 时保存当时的选择；修改全局默认值不改动已有 Session。Runtime 启动时按目标 Session 生成最终环境。同 Workspace 且最终环境、权限模式和 OMP 版本相容的空闲 Runtime 可以切换 Session 复用；最终环境不同时必须替换底层 OMP 进程。
 
 ### 9.2 内置 Terminal
 
@@ -367,8 +369,10 @@ MVP 暂不包含：
 ### Phase 2.5：多 Session 并行
 
 1. 为每个正在生成的 Session 分配独立 OMP Runtime。
-2. 在 Settings 中设置最大并行数量。
-3. 达到上限时提供队列和明确提示。
+2. Settings 只提供新会话默认网络和最大并行 Session 数量两项；并行数量默认为 5，可设为 1–10。
+3. 达到上限后进入全局 FIFO 队列，显示队列位置并支持取消。
+4. 让 Session 和 Workspace 行可以区分排队、执行、等待交互、失败和未查看完成状态。
+5. 闲置 Runtime 按条件复用并定时回收，应用退出后不遗留 OMP 及子进程。
 
 ### Phase 3：Browser Use
 

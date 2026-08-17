@@ -30,6 +30,8 @@ export type SessionPreference = {
   pinned?: boolean
   archived?: boolean
   approvalMode?: ApprovalMode
+  network?: RuntimeNetworkConfig
+  unreadCompletion?: boolean
 }
 
 export type DesktopState = {
@@ -46,6 +48,24 @@ const emptyState = (): DesktopState => ({
   sessionPreferences: {},
   ui: {}
 })
+
+function isRuntimeNetworkConfig(value: unknown): value is RuntimeNetworkConfig {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const record = value as Record<string, unknown>
+  if (
+    record['mode'] !== 'off' &&
+    record['mode'] !== 'auto' &&
+    record['mode'] !== 'manual'
+  )
+    return false
+  return (
+    record['mode'] !== 'manual' ||
+    (typeof record['manualPort'] === 'number' &&
+      Number.isInteger(record['manualPort']) &&
+      record['manualPort'] >= 1 &&
+      record['manualPort'] <= 65_535)
+  )
+}
 
 function parseState(value: unknown): DesktopState {
   if (!value || typeof value !== 'object' || Array.isArray(value))
@@ -231,6 +251,43 @@ export class DesktopStateStore {
     })
   }
 
+  sessionNetworkMigrationBaseline(): RuntimeNetworkConfig {
+    const value = this.#state.ui['sessionNetworkMigrationBaseline']
+    return isRuntimeNetworkConfig(value) ? value : this.runtimeNetworkConfig()
+  }
+
+  async ensureSessionNetworkMigrationBaseline(): Promise<void> {
+    if (
+      this.#state.ui['sessionNetworkConfigVersion'] === 1 &&
+      isRuntimeNetworkConfig(this.#state.ui['sessionNetworkMigrationBaseline'])
+    )
+      return
+    await this.#commit(() => {
+      this.#state.ui['sessionNetworkConfigVersion'] = 1
+      this.#state.ui['sessionNetworkMigrationBaseline'] = {
+        ...this.runtimeNetworkConfig()
+      }
+    })
+  }
+
+  maxParallelSessions(): number {
+    const value = this.#state.ui['maxParallelSessions']
+    return typeof value === 'number' &&
+      Number.isInteger(value) &&
+      value >= 1 &&
+      value <= 10
+      ? value
+      : 5
+  }
+
+  async setMaxParallelSessions(value: number): Promise<void> {
+    if (!Number.isInteger(value) || value < 1 || value > 10)
+      throw new Error('最大并行数量必须是 1–10 的整数')
+    await this.#commit(() => {
+      this.#state.ui['maxParallelSessions'] = value
+    })
+  }
+
   sessionPreference(workspaceId: string, sessionId: string): SessionPreference {
     const preference =
       this.#state.sessionPreferences[workspaceId]?.[sessionId] ?? {}
@@ -243,6 +300,12 @@ export class DesktopStateStore {
         : {}),
       ...(isApprovalMode(preference.approvalMode)
         ? { approvalMode: preference.approvalMode }
+        : {}),
+      ...(isRuntimeNetworkConfig(preference.network)
+        ? { network: preference.network }
+        : {}),
+      ...(typeof preference.unreadCompletion === 'boolean'
+        ? { unreadCompletion: preference.unreadCompletion }
         : {})
     }
   }
@@ -310,7 +373,10 @@ export class DesktopStateStore {
       workspaces: selected.map((item): WorkspaceSummary => ({
         ...item,
         name: basename(item.path),
-        available: availability.get(item.id) ?? false
+        available: availability.get(item.id) ?? false,
+        unreadCompletion: Object.values(
+          this.#state.sessionPreferences[item.id] ?? {}
+        ).some((preference) => preference.unreadCompletion === true)
       })),
       hasMore: older.length > offset
     }
@@ -324,7 +390,8 @@ export class DesktopStateStore {
     return {
       ...session,
       pinned: preference.pinned === true && preference.archived !== true,
-      archived: preference.archived === true
+      archived: preference.archived === true,
+      unreadCompletion: preference.unreadCompletion === true
     }
   }
 

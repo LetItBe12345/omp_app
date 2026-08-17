@@ -132,9 +132,13 @@ export function ModelControls({
 
   const selectModel = async (model: AvailableModel): Promise<void> => {
     setControlError(null)
+    if (!runtime.sessionId) {
+      setControlError('Session ID 不可用')
+      return
+    }
     const thinkingLevel =
       model.thinking?.defaultLevel ?? model.thinking?.efforts[0]
-    const result = await window.desktop.selectModel({
+    const result = await window.desktop.selectModel(runtime.sessionId, {
       provider: model.provider,
       modelId: model.id,
       ...(thinkingLevel ? { thinkingLevel } : {})
@@ -150,8 +154,12 @@ export function ModelControls({
   const selectThinking = async (level: string): Promise<void> => {
     if (!effectiveSelection) return
     setControlError(null)
+    if (!runtime.sessionId) {
+      setControlError('Session ID 不可用')
+      return
+    }
     if (busy) {
-      const result = await window.desktop.selectModel({
+      const result = await window.desktop.selectModel(runtime.sessionId, {
         ...effectiveSelection,
         thinkingLevel: level
       })
@@ -159,7 +167,10 @@ export function ModelControls({
       else setControlError(result.error.message)
       return
     }
-    const result = await window.desktop.setThinkingLevel(level)
+    const result = await window.desktop.setThinkingLevel(
+      runtime.sessionId,
+      level
+    )
     if (result.ok) {
       const state = await window.desktop.getRuntimeState()
       if (state.ok) onSnapshot(state.data)
@@ -171,7 +182,13 @@ export function ModelControls({
   }
 
   const cancelPending = async (): Promise<void> => {
-    const result = await window.desktop.cancelPendingModelSelection()
+    if (!runtime.sessionId) {
+      setControlError('Session ID 不可用')
+      return
+    }
+    const result = await window.desktop.cancelPendingModelSelection(
+      runtime.sessionId
+    )
     if (result.ok) onSnapshot(result.data)
     else setControlError(result.error.message)
   }
@@ -184,7 +201,11 @@ export function ModelControls({
       onTemporaryApprovalMode?.(mode)
       return
     }
-    const result = await window.desktop.setApprovalMode(mode)
+    if (!runtime.sessionId) {
+      setControlError('Session ID 不可用')
+      return
+    }
+    const result = await window.desktop.setApprovalMode(runtime.sessionId, mode)
     if (result.ok) onSnapshot(result.data)
     else {
       setControlError(result.error.message)
@@ -614,6 +635,7 @@ function ProviderLoginDialog({
                   input={loginState.input}
                   key={loginState.input.id}
                   onError={setLocalError}
+                  sessionId={loginState.input.sessionId}
                 />
               )}
 
@@ -660,10 +682,12 @@ function ProviderLoginDialog({
 
 function ProviderLoginInput({
   input,
-  onError
+  onError,
+  sessionId
 }: {
   input: NonNullable<ProviderLoginState['input']>
   onError: (message: string) => void
+  sessionId?: string
 }): React.JSX.Element {
   const [inputValue, setInputValue] = useState('')
   const [showInput, setShowInput] = useState(false)
@@ -673,7 +697,11 @@ function ProviderLoginInput({
     const value = inputValue
     setInputValue('')
     setShowInput(false)
-    const result = await window.desktop.respondExtensionUi(input.id, { value })
+    const result = await window.desktop.respondExtensionUi(
+      sessionId ?? null,
+      input.id,
+      { value }
+    )
     if (!result.ok) onError(result.error.message)
   }
 

@@ -309,7 +309,13 @@ Terminal 和 Browser 按需创建。
 
 单个 OMP Runtime 当前只有一个活动 `AgentSession`。RPC `prompt` 不携带 Session ID，`switch_session` 会切换这个单例，因此 MVP 虽能保存和切换多个 Session，同一时间只能有一个 Session 生成。
 
-MVP 之后如需多 Session 并行，采用 Runtime 池：每个正在生成的 Session 对应一个 OMP RPC 进程，事件和生命周期以 Session ID 路由。Settings 控制最大并行数量，达到上限后排队或提示用户处理。闲置 Session 只保留 Session 文件，不占用进程。
+MVP 之后如需多 Session 并行，采用 Runtime 池：每个正在生成的 Session 对应一个 OMP RPC 进程。Settings 的最大并行数量默认为 5，可设为 1–10；保温进程和 Provider 登录进程也计入总数。达到上限后，新任务按 Main 接收时间进入全局 FIFO 队列。
+
+Runtime Pool 为每次 Session 租约分配 Runtime Instance ID 和 generation。RPC 响应、流式事件、Tool Approval 和 Extension UI 使用 `Runtime Instance ID + generation + 原始 ID` 隔离，再核对 Workspace ID 和 Session ID。切换 Session 后的迟到事件不得进入新 Session。
+
+Renderer 发出 Prompt、Follow-up、Stop、模型、权限和交互响应时必须显式携带目标 Session ID。Main 先校验 Session 属于当前 Workspace，Runtime Pool 再按 Session ID 查找绑定的 Runtime，不使用当前可见 Runtime 作为隐式路由条件。Provider 登录中不属于 Session 的 Extension UI 输入显式使用空目标，仅在全局登录任务存在时接受。
+
+正在执行、等待交互和正在停止的 Runtime 不回收。后台空闲 Runtime 保温 60 秒，当前可见 Session 的空闲 Runtime 保温 5 分钟；切换可见 Session 不重置计时。有排队任务时，空闲 Runtime 立即让出容量。应用退出时并行关闭全部 Runtime，共用 5 秒期限，然后强制清理剩余进程组。
 
 ### 7.1 OMP Runtime 环境与网络
 
@@ -333,7 +339,7 @@ MVP 不为 Electron 自身建立泛化代理层。Desktop 是 OMP Runtime 配置
 
 RPC 只传输命令和事件。OMP Runtime 实际执行 Agent Bash Tool，它启动的 Shell 子进程默认继承 Runtime 的最终环境。
 
-修改任一 Profile 后，Main 必须重启 OMP Runtime，然后通过 OMP Session 恢复当前会话。
+修改任一 Profile 后，Main 必须使用新的最终环境创建 OMP 进程，然后通过 OMP Session 恢复当前会话。多 Runtime 阶段的 Network Profile 由新 Session 全局默认值和 Session 独立配置组成。空闲 Runtime 只有在 Workspace、最终环境指纹、Approval Mode 和 OMP 版本都相容时才可以切换 Session 复用。
 
 后续的内置 Terminal 是独立 PTY 进程，不参与 Agent Bash Tool 执行。Terminal 和 Browser 分别拥有自己的代理适配，不强制与 OMP Runtime 使用同一策略。
 
