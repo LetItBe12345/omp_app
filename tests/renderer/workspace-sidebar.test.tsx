@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type {
   RuntimeSnapshot,
+  SessionRuntimeState,
   SessionSummary,
   WorkspaceOverview
 } from '../../src/shared/desktop-api'
@@ -48,8 +49,13 @@ const sessions: SessionSummary[] = [
   }
 ]
 
-function renderSidebar(onRenameSession = vi.fn()): void {
-  render(
+function renderSidebar(
+  onRenameSession = vi.fn(),
+  sessionRuntimeStates: Record<string, SessionRuntimeState> = {},
+  sessionItems = sessions,
+  workspaceOverview = overview
+): ReturnType<typeof render> {
+  return render(
     <WorkspaceSidebar
       archivedExpanded={false}
       error={null}
@@ -69,10 +75,11 @@ function renderSidebar(onRenameSession = vi.fn()): void {
       onSwitchSession={vi.fn()}
       openingWorkspace={false}
       switchingWorkspace={false}
-      overview={overview}
+      overview={workspaceOverview}
       runtime={runtime}
       search=""
-      sessions={sessions}
+      sessionRuntimeStates={sessionRuntimeStates}
+      sessions={sessionItems}
     />
   )
 }
@@ -121,5 +128,96 @@ describe('WorkspaceSidebar', () => {
       screen.queryByRole('textbox', { name: '重命名 当前会话' })
     ).not.toBeInTheDocument()
     expect(onRenameSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('Session 和 Workspace 的等待交互状态优先于未查看蓝点', () => {
+    const state: SessionRuntimeState = {
+      runtimeInstanceId: 'runtime-1',
+      generation: 1,
+      workspacePath: '/home/jin/projects/example',
+      sessionId: 'session-active',
+      phase: 'waiting-interaction',
+      snapshot: runtime
+    }
+    renderSidebar(
+      vi.fn(),
+      { 'session-active': state },
+      [{ ...sessions[0]!, unreadCompletion: true }],
+      {
+        ...overview,
+        workspaces: [{ ...overview.workspaces[0]!, unreadCompletion: true }]
+      }
+    )
+
+    expect(screen.getByLabelText('等待操作')).toBeInTheDocument()
+    expect(screen.getByLabelText('有会话等待操作')).toBeInTheDocument()
+    expect(
+      screen.queryByLabelText('运行已完成，尚未查看')
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByLabelText('有未查看的已完成会话')
+    ).not.toBeInTheDocument()
+  })
+
+  it('会话行使用图标区分排队和执行，不写状态文字', () => {
+    const baseState = {
+      runtimeInstanceId: 'runtime-1',
+      generation: 1,
+      workspacePath: '/home/jin/projects/example',
+      sessionId: 'session-active',
+      snapshot: runtime
+    }
+    const rendered = renderSidebar(vi.fn(), {
+      'session-active': { ...baseState, phase: 'queued' }
+    })
+    expect(screen.getByLabelText('等待开始')).toBeInTheDocument()
+    expect(screen.queryByText('等待')).not.toBeInTheDocument()
+
+    rendered.rerender(
+      <WorkspaceSidebar
+        archivedExpanded={false}
+        error={null}
+        hasMoreSessions={false}
+        onActivateWorkspace={vi.fn()}
+        onArchiveSession={vi.fn()}
+        onArchivedExpanded={vi.fn()}
+        onDeleteSession={vi.fn()}
+        onLoadMoreSessions={vi.fn()}
+        onLoadMoreWorkspaces={vi.fn()}
+        onNewSession={vi.fn()}
+        onOpenWorkspace={vi.fn()}
+        onPinSession={vi.fn()}
+        onPinWorkspace={vi.fn()}
+        onRenameSession={vi.fn()}
+        onSearch={vi.fn()}
+        onStopSession={vi.fn()}
+        onSwitchSession={vi.fn()}
+        openingWorkspace={false}
+        overview={overview}
+        runtime={runtime}
+        search=""
+        sessionRuntimeStates={{
+          'session-active': { ...baseState, phase: 'running' }
+        }}
+        sessions={sessions}
+        switchingWorkspace={false}
+      />
+    )
+    expect(screen.getByLabelText('正在执行')).toBeInTheDocument()
+  })
+
+  it('会话运行失败时显示红色失败图标', () => {
+    renderSidebar(vi.fn(), {
+      'session-active': {
+        runtimeInstanceId: 'runtime-1',
+        generation: 1,
+        workspacePath: '/home/jin/projects/example',
+        sessionId: 'session-active',
+        phase: 'failed',
+        snapshot: runtime
+      }
+    })
+
+    expect(screen.getByLabelText('运行失败')).toHaveClass('text-red-600')
   })
 })

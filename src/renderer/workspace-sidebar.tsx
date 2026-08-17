@@ -1,5 +1,7 @@
 import {
   Archive,
+  CircleAlert,
+  Clock3,
   Folder,
   LoaderCircle,
   MessageSquare,
@@ -10,9 +12,11 @@ import {
 import { useState } from 'react'
 import type {
   RuntimeSnapshot,
+  SessionRuntimeState,
   SessionSummary,
   WorkspaceOverview
 } from '../shared/desktop-api'
+import { RuntimeSettingsDialog } from './runtime-settings-dialog'
 
 type MenuTarget =
   | { kind: 'workspace'; id: string; pinned: boolean }
@@ -45,6 +49,7 @@ export function WorkspaceSidebar({
   runtime,
   overview,
   sessions,
+  sessionRuntimeStates = {},
   search,
   error,
   archivedExpanded,
@@ -54,6 +59,7 @@ export function WorkspaceSidebar({
   onSearch,
   onActivateWorkspace,
   onSwitchSession,
+  onStopSession = () => undefined,
   onPinWorkspace,
   onPinSession,
   onArchiveSession,
@@ -68,6 +74,7 @@ export function WorkspaceSidebar({
   runtime: RuntimeSnapshot
   overview: WorkspaceOverview
   sessions: SessionSummary[]
+  sessionRuntimeStates?: Record<string, SessionRuntimeState>
   search: string
   error: string | null
   archivedExpanded: boolean
@@ -77,6 +84,7 @@ export function WorkspaceSidebar({
   onSearch: (query: string) => void
   onActivateWorkspace: (id: string) => void
   onSwitchSession: (id: string) => void
+  onStopSession?: (id: string) => void
   onPinWorkspace: (id: string, pinned: boolean) => void
   onPinSession: (id: string, pinned: boolean) => void
   onArchiveSession: (id: string, archived: boolean) => void
@@ -109,12 +117,15 @@ export function WorkspaceSidebar({
       data-slot="conversation-sidebar"
       onClick={() => setMenu(null)}
     >
-      <div className="flex h-16 items-center justify-between px-5">
+      <div className="flex h-16 items-center gap-1 px-5">
         <h1 className="text-[15px] font-semibold">新建对话</h1>
+        <span className="ml-auto">
+          <RuntimeSettingsDialog />
+        </span>
         <button
           aria-label="新建对话"
           className="inline-grid size-8 place-items-center rounded-lg"
-          disabled={!activeWorkspace || runtime.status !== 'ready'}
+          disabled={!activeWorkspace}
           onClick={(event) => {
             event.stopPropagation()
             onNewSession()
@@ -204,6 +215,28 @@ export function WorkspaceSidebar({
                 >
                   <Folder size={15} />
                   <span className="truncate">{workspace.name}</span>
+                  {Object.values(sessionRuntimeStates).some(
+                    (state) =>
+                      state.workspacePath === workspace.path &&
+                      state.phase === 'waiting-interaction'
+                  ) && (
+                    <span
+                      aria-label="有会话等待操作"
+                      className="ml-auto size-2 rounded-full bg-amber-500"
+                    />
+                  )}
+                  {workspace.unreadCompletion &&
+                    !Object.values(sessionRuntimeStates).some(
+                      (state) =>
+                        state.workspacePath === workspace.path &&
+                        (state.phase === 'waiting-interaction' ||
+                          state.phase === 'failed')
+                    ) && (
+                      <span
+                        aria-label="有未查看的已完成会话"
+                        className="ml-auto size-2 rounded-full bg-blue-500"
+                      />
+                    )}
                   {workspace.pinned && <Pin className="ml-auto" size={12} />}
                   {!workspace.available && (
                     <span className="ml-auto text-[10px] text-red-600">
@@ -293,20 +326,30 @@ export function WorkspaceSidebar({
                                     setRenaming(null)
                                   }
                                 }}
-                                value={renaming.title}
+                                value={renaming?.title ?? ''}
                               />
                             </form>
                           ) : (
                             <button
+                              aria-current={
+                                session.id === runtime.sessionId
+                                  ? 'true'
+                                  : undefined
+                              }
                               className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm ${
                                 session.id === runtime.sessionId
                                   ? 'bg-[var(--surface-selected)]'
                                   : ''
                               }`}
+                              data-session-id={session.id}
+                              data-session-phase={
+                                sessionRuntimeStates[session.id]?.phase ??
+                                'none'
+                              }
                               disabled={
                                 session.compatibility === 'corrupt' ||
                                 session.compatibility === 'future' ||
-                                runtime.status !== 'ready' ||
+                                runtime.status === 'starting' ||
                                 runtime.approvalModeChanging === true
                               }
                               onClick={() => onSwitchSession(session.id)}
@@ -337,6 +380,52 @@ export function WorkspaceSidebar({
                             >
                               <MessageSquare size={14} />
                               <span className="truncate">{session.title}</span>
+                              {sessionRuntimeStates[session.id]?.phase ===
+                                'waiting-interaction' && (
+                                <CircleAlert
+                                  aria-label="等待操作"
+                                  className="ml-auto text-amber-600"
+                                  size={13}
+                                />
+                              )}
+                              {sessionRuntimeStates[session.id]?.phase ===
+                                'failed' && (
+                                <CircleAlert
+                                  aria-label="运行失败"
+                                  className="ml-auto text-red-600"
+                                  size={13}
+                                />
+                              )}
+                              {sessionRuntimeStates[session.id]?.phase ===
+                                'queued' && (
+                                <Clock3
+                                  aria-label="等待开始"
+                                  className="ml-auto text-[var(--text-muted)]"
+                                  size={13}
+                                />
+                              )}
+                              {(sessionRuntimeStates[session.id]?.phase ===
+                                'starting' ||
+                                sessionRuntimeStates[session.id]?.phase ===
+                                  'running' ||
+                                sessionRuntimeStates[session.id]?.phase ===
+                                  'stopping') && (
+                                <LoaderCircle
+                                  aria-label="正在执行"
+                                  className="ml-auto animate-spin text-[var(--text-secondary)]"
+                                  size={13}
+                                />
+                              )}
+                              {session.unreadCompletion &&
+                                sessionRuntimeStates[session.id]?.phase !==
+                                  'waiting-interaction' &&
+                                sessionRuntimeStates[session.id]?.phase !==
+                                  'failed' && (
+                                  <span
+                                    aria-label="运行已完成，尚未查看"
+                                    className="ml-auto size-2 rounded-full bg-blue-500"
+                                  />
+                                )}
                               {session.pinned && (
                                 <Pin className="ml-auto" size={11} />
                               )}
@@ -383,6 +472,21 @@ export function WorkspaceSidebar({
           </button>
           {menu.kind === 'session' && (
             <>
+              {(sessionRuntimeStates[menu.id]?.phase === 'running' ||
+                sessionRuntimeStates[menu.id]?.phase ===
+                  'waiting-interaction') && (
+                <button
+                  className="w-full rounded px-3 py-2 text-left hover:bg-[var(--surface-selected)]"
+                  onClick={() => {
+                    onStopSession(menu.id)
+                    setMenu(null)
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  停止任务
+                </button>
+              )}
               <button
                 className="w-full rounded px-3 py-2 text-left hover:bg-[var(--surface-selected)]"
                 onClick={() => {

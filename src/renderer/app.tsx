@@ -21,11 +21,12 @@ import type {
   AvailableSlashCommand,
   AvailableModel,
   ContextReference,
-  CreatedSession,
   LoginProvider,
   ProviderLoginState,
   PromptInput,
+  QueuedSessionSubmission,
   RuntimeSnapshot,
+  SessionRuntimeState,
   SessionSummary,
   WorkspaceOverview
 } from '../shared/desktop-api'
@@ -213,9 +214,14 @@ function Conversation({
   references,
   onReferences,
   temporarySession,
+  temporarySessionId,
+  temporaryRuntimeState,
+  recovery,
   temporaryApprovalMode,
   onTemporaryApprovalMode,
-  onSessionCreated,
+  onSessionQueued,
+  onPromptAccepted,
+  onRecoveryConsumed,
   openingSession,
   recentReferences,
   onSentReferences,
@@ -241,9 +247,17 @@ function Conversation({
   references: ContextReference[]
   onReferences: (references: ContextReference[]) => void
   temporarySession: boolean
+  temporarySessionId?: string
+  temporaryRuntimeState?: SessionRuntimeState
+  recovery?: {
+    input: PromptInput
+    reason: 'cancelled' | 'start-failed' | 'runtime-crashed'
+  }
   temporaryApprovalMode: ApprovalMode
   onTemporaryApprovalMode: (mode: ApprovalMode) => void
-  onSessionCreated: (created: CreatedSession) => void
+  onSessionQueued: (submission: QueuedSessionSubmission, title: string) => void
+  onPromptAccepted: () => void
+  onRecoveryConsumed: (replacement?: PromptInput) => void
   openingSession: boolean
   recentReferences: ContextReference[]
   onSentReferences: (references: ContextReference[]) => void
@@ -260,10 +274,16 @@ function Conversation({
     !modelsLoaded ||
     !runtime.model ||
     models.some((model) => `${model.provider}/${model.id}` === runtime.model)
+  const runtimeCanAcceptPrompt =
+    runtime.status === 'ready' ||
+    ((runtime.status === 'stopped' || runtime.status === 'failed') &&
+      Boolean(runtime.workspacePath))
   const ready =
-    runtime.status === 'ready' &&
+    runtimeCanAcceptPrompt &&
     !runtime.isAuthenticating &&
-    currentModelAvailable
+    currentModelAvailable &&
+    temporaryRuntimeState?.phase !== 'queued' &&
+    temporaryRuntimeState?.phase !== 'starting'
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
   const optimisticUserSequence = useRef(0)
   const composerComposingRef = useRef(false)
@@ -305,9 +325,13 @@ function Conversation({
 
   const stop = async (): Promise<void> => {
     if (!busy || stopping) return
+    if (!runtime.sessionId) {
+      setError('Session ID 不可用')
+      return
+    }
     setStopping(true)
     setError(null)
-    const result = await window.desktop.stopCurrentRun()
+    const result = await window.desktop.stopCurrentRun(runtime.sessionId)
     if (result.ok) {
       onInput(result.data?.message ?? '')
       const state = await window.desktop.getRuntimeState()
@@ -404,21 +428,36 @@ function Conversation({
     onInput('')
     onReferences([])
     onAttachments([])
+    const title = visibleText.split(/\r?\n/u)[0]?.trim() || '图片会话'
+    const targetSessionId = runtime.sessionId
+    if (!temporarySession && !targetSessionId) {
+      setProjection((current) =>
+        removeConversationTurn(current, optimisticUserId)
+      )
+      onInput(value)
+      onReferences(references)
+      onAttachments(attachments)
+      setError('Session ID 不可用')
+      setSending(false)
+      return
+    }
     const result =
       temporarySession && !busy
         ? await window.desktop.createSession(
             promptInput,
-            visibleText.split(/\r?\n/u)[0]?.trim() || '图片会话',
+            title,
             temporaryApprovalMode
           )
         : busy
-          ? await window.desktop.followUp(promptInput)
-          : await window.desktop.prompt(promptInput)
+          ? await window.desktop.followUp(targetSessionId!, promptInput)
+          : await window.desktop.prompt(targetSessionId!, promptInput)
     if (result.ok) {
       onSentReferences(references)
       setSlashMenuDismissedFor(null)
       setSlashSelectionIndex(0)
-      if (temporarySession && result.data) onSessionCreated(result.data)
+      if (temporarySession && result.data)
+        onSessionQueued(result.data as QueuedSessionSubmission, title)
+      else onPromptAccepted()
     } else {
       setProjection((current) =>
         removeConversationTurn(current, optimisticUserId)
@@ -553,6 +592,9 @@ function Conversation({
     <main
       className="flex h-full min-w-0 flex-col bg-[var(--surface-main)]"
       data-slot="conversation-main"
+      data-runtime-session-id={runtime.sessionId}
+      data-temporary-session={temporarySession ? 'true' : 'false'}
+      data-temporary-session-id={temporarySessionId}
     >
       <header className="flex h-16 shrink-0 items-center border-b border-[var(--border-subtle)] px-7">
         <div>
@@ -611,6 +653,61 @@ function Conversation({
 
       <div className="shrink-0 p-5 pt-0">
         <div className="relative mx-auto max-w-4xl rounded-2xl border border-[var(--border)] bg-white p-3 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+          {temporaryRuntimeState?.phase === 'queued' && temporarySessionId && (
+            <div className="mb-2 flex items-center gap-2 rounded-lg bg-[var(--surface-selected)] px-3 py-2 text-xs">
+              <span>
+                等待 Runtime
+                {temporaryRuntimeState.queuePosition
+                  ? ` · 队列位置 ${temporaryRuntimeState.queuePosition}`
+                  : ''}
+              </span>
+              <button
+                className="ml-auto underline underline-offset-2"
+                onClick={() => {
+                  void window.desktop
+                    .cancelQueuedSession(temporarySessionId)
+                    .then((result) => {
+                      if (!result.ok) setError(result.error.message)
+                    })
+                }}
+                type="button"
+              >
+                取消等待
+              </button>
+            </div>
+          )}
+          {recovery && (
+            <div className="mb-2 flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <span>
+                {recovery.reason === 'cancelled'
+                  ? '已取消的消息'
+                  : recovery.reason === 'runtime-crashed'
+                    ? 'Runtime 崩溃时的消息'
+                    : '启动失败的消息'}
+              </span>
+              <button
+                className="ml-auto underline underline-offset-2"
+                onClick={() => {
+                  const previous = {
+                    message: input,
+                    references,
+                    ...(attachments.length ? { images: attachments } : {})
+                  }
+                  onInput(recovery.input.message)
+                  onReferences(recovery.input.references ?? [])
+                  onAttachments(recovery.input.images ?? [])
+                  const hasPrevious =
+                    previous.message ||
+                    previous.references.length ||
+                    previous.images?.length
+                  onRecoveryConsumed(hasPrevious ? previous : undefined)
+                }}
+                type="button"
+              >
+                恢复到输入框
+              </button>
+            </div>
+          )}
           <ModelControls
             catalogError={catalogError}
             loginState={loginState}
@@ -849,6 +946,7 @@ function Conversation({
         if (message.trim()) await send(message)
       }}
       projection={projection}
+      sessionId={runtime.sessionId}
       setProjection={setProjection}
       workspacePath={runtime.workspacePath}
     >
@@ -918,11 +1016,26 @@ export function App(): React.JSX.Element {
       : []
   )
   const [sessionSearch, setSessionSearch] = useState('')
+  const [sessionRuntimeStates, setSessionRuntimeStates] = useState<
+    Record<string, SessionRuntimeState>
+  >({})
   const [sessionError, setSessionError] = useState<string | null>(null)
   const [sessionNextOffset, setSessionNextOffset] = useState(0)
   const [hasMoreSessions, setHasMoreSessions] = useState(false)
   const [workspaceOffset, setWorkspaceOffset] = useState(0)
   const [temporarySession, setTemporarySession] = useState(false)
+  const [temporarySessionId, setTemporarySessionId] = useState<
+    string | undefined
+  >()
+  const [recoveries, setRecoveries] = useState<
+    Record<
+      string,
+      {
+        input: PromptInput
+        reason: 'cancelled' | 'start-failed' | 'runtime-crashed'
+      }
+    >
+  >({})
   const [temporaryApprovalMode, setTemporaryApprovalMode] =
     useState<ApprovalMode>('yolo')
   const [archivedExpanded, setArchivedExpanded] = useState(false)
@@ -951,25 +1064,54 @@ export function App(): React.JSX.Element {
   const workspaceRequestPending = useRef(false)
   const runtimeReadyRef = useRef(false)
   const temporarySessionRef = useRef(temporarySession)
+  const temporarySessionIdRef = useRef(temporarySessionId)
   const activeWorkspaceId = overview.activeWorkspaceId
   const activeWorkspaceIdRef = useRef(activeWorkspaceId)
   const sessionSearchRef = useRef(sessionSearch)
   const runtimeRef = useRef(runtime)
+  const overviewRef = useRef(overview)
+  const composerInputRef = useRef(composerInput)
+  const referencesRef = useRef(references)
+  const attachmentsRef = useRef(attachments)
+  const temporaryWorkspacePaths = useRef(new Map<string, string>())
+  const temporaryBindings = useRef(new Map<string, string>())
+  const restoredRuntimeGenerations = useRef(new Set<string>())
   const temporaryBaseSessionIdRef = useRef<string | undefined>(undefined)
   const currentProjectionKey = runtimeSessionKey(runtime)
   const visibleRuntime = useMemo(
     () =>
       temporarySession
-        ? { ...runtime, sessionId: undefined, sessionName: undefined }
+        ? {
+            ...runtime,
+            sessionId: temporarySessionId,
+            sessionName: undefined,
+            isStreaming: false,
+            queuedMessageCount: 0,
+            toolApprovals: []
+          }
         : runtime,
-    [runtime, temporarySession]
+    [runtime, temporarySession, temporarySessionId]
   )
 
   useLayoutEffect(() => {
     projectionRef.current = projection
     runtimeRef.current = runtime
+    overviewRef.current = overview
+    composerInputRef.current = composerInput
+    referencesRef.current = references
+    attachmentsRef.current = attachments
     temporarySessionRef.current = temporarySession
-  }, [projection, runtime, temporarySession])
+    temporarySessionIdRef.current = temporarySessionId
+  }, [
+    attachments,
+    composerInput,
+    overview,
+    projection,
+    references,
+    runtime,
+    temporarySession,
+    temporarySessionId
+  ])
 
   useLayoutEffect(() => {
     activeWorkspaceIdRef.current = activeWorkspaceId
@@ -1022,7 +1164,8 @@ export function App(): React.JSX.Element {
       workspaceId: string,
       offset = 0,
       query = '',
-      append = false
+      append = false,
+      preserveOrder = false
     ): Promise<void> => {
       if (fixture) return
       const requestId = ++sessionRequestId.current
@@ -1036,9 +1179,25 @@ export function App(): React.JSX.Element {
         setSessionError(result.error.message)
         return
       }
-      setSessions((current) =>
-        append ? [...current, ...result.data.sessions] : result.data.sessions
-      )
+      setSessions((current) => {
+        if (append) return [...current, ...result.data.sessions]
+        if (!preserveOrder) return result.data.sessions
+        const fresh = new Map(
+          result.data.sessions.map((session) => [session.id, session])
+        )
+        const ordered = current.flatMap((session) => {
+          const replacement = fresh.get(session.id)
+          if (!replacement)
+            return session.id.startsWith('temporary-') ? [session] : []
+          fresh.delete(session.id)
+          return [
+            session.unreadCompletion
+              ? { ...replacement, unreadCompletion: true }
+              : replacement
+          ]
+        })
+        return [...ordered, ...fresh.values()]
+      })
       setSessionNextOffset(result.data.nextOffset)
       setHasMoreSessions(result.data.hasMore)
       setSessionError(null)
@@ -1171,6 +1330,284 @@ export function App(): React.JSX.Element {
         applySnapshot(event.snapshot)
         refreshCatalogWhenReady(event.snapshot)
       }
+      if (event.type === 'session-runtime' && event.state.sessionId) {
+        setSessionRuntimeStates((current) => ({
+          ...current,
+          [event.state.sessionId!]: event.state
+        }))
+      }
+      if (event.type === 'pool-snapshot') {
+        setSessionRuntimeStates(
+          Object.fromEntries(
+            event.states.flatMap((state) =>
+              state.sessionId ? [[state.sessionId, state]] : []
+            )
+          )
+        )
+        const activeWorkspace = overviewRef.current.workspaces.find(
+          (workspace) => workspace.id === overviewRef.current.activeWorkspaceId
+        )
+        const temporaryStates = event.states.filter(
+          (state) =>
+            state.temporary &&
+            state.sessionId &&
+            state.workspacePath === activeWorkspace?.path
+        )
+        for (const state of temporaryStates) {
+          if (state.sessionId && state.workspacePath) {
+            temporaryWorkspacePaths.current.set(
+              state.sessionId,
+              state.workspacePath
+            )
+            const key = `${state.workspacePath}:${state.sessionId}`
+            if (state.temporaryInput && !projectionCache.current.has(key))
+              projectionCache.current.set(
+                key,
+                appendUserTurn(
+                  createConversationProjection(),
+                  state.temporaryInput.message,
+                  Date.now(),
+                  `temporary-user-${state.sessionId}`
+                )
+              )
+            if (state.visible) {
+              setTemporarySession(true)
+              setTemporarySessionId(state.sessionId)
+              const cached = projectionCache.current.get(key)
+              if (cached) setProjection(cached)
+            }
+          }
+        }
+        if (activeWorkspace && temporaryStates.length > 0) {
+          const now = new Date().toISOString()
+          setSessions((current) => {
+            const temporaryIds = new Set(
+              temporaryStates.flatMap((state) =>
+                state.sessionId ? [state.sessionId] : []
+              )
+            )
+            const restored = temporaryStates.flatMap((state) =>
+              state.sessionId
+                ? [
+                    {
+                      id: state.sessionId,
+                      workspaceId: activeWorkspace.id,
+                      path: `temporary:${state.sessionId}`,
+                      title: state.snapshot.sessionName ?? '新对话',
+                      createdAt: now,
+                      modifiedAt: now,
+                      messageCount: 1,
+                      size: 0,
+                      pinned: false,
+                      archived: false,
+                      compatibility: 'v3' as const,
+                      status: 'pending' as const
+                    }
+                  ]
+                : []
+            )
+            return [
+              ...restored,
+              ...current.filter((session) => !temporaryIds.has(session.id))
+            ]
+          })
+        }
+        for (const state of event.states) {
+          if (
+            state.temporary ||
+            !state.sessionId ||
+            !state.workspacePath ||
+            (state.phase !== 'running' &&
+              state.phase !== 'waiting-interaction' &&
+              state.phase !== 'stopping')
+          )
+            continue
+          const generationKey = `${state.runtimeInstanceId}:${state.generation}`
+          if (restoredRuntimeGenerations.current.has(generationKey)) continue
+          restoredRuntimeGenerations.current.add(generationKey)
+          const projectionKey = `${state.workspacePath}:${state.sessionId}`
+          void window.desktop
+            .getSessionMessages(state.sessionId)
+            .then((result) => {
+              if (!result.ok) {
+                restoredRuntimeGenerations.current.delete(generationKey)
+                return
+              }
+              const restored = (state.pendingExtensionUi ?? []).reduce(
+                (current, pendingEvent) =>
+                  reduceOmpEvent(current, pendingEvent),
+                projectHistory(result.data)
+              )
+              projectionCache.current.set(projectionKey, restored)
+              if (
+                runtimeSessionKey(runtimeRef.current) === projectionKey &&
+                temporarySessionIdRef.current === undefined
+              )
+                setProjection(restored)
+            })
+        }
+      }
+      if (event.type === 'temporary-session-bound') {
+        if (event.snapshot.sessionId)
+          temporaryBindings.current.set(
+            event.temporarySessionId,
+            event.snapshot.sessionId
+          )
+        const workspacePath = temporaryWorkspacePaths.current.get(
+          event.temporarySessionId
+        )
+        const oldKey = workspacePath
+          ? `${workspacePath}:${event.temporarySessionId}`
+          : undefined
+        const newKey = runtimeSessionKey(event.snapshot)
+        const cached = oldKey ? projectionCache.current.get(oldKey) : undefined
+        if (oldKey) projectionCache.current.delete(oldKey)
+        if (newKey && cached) projectionCache.current.set(newKey, cached)
+        temporaryWorkspacePaths.current.delete(event.temporarySessionId)
+        setSessionRuntimeStates((current) => {
+          const next = { ...current }
+          delete next[event.temporarySessionId]
+          if (event.snapshot.sessionId)
+            next[event.snapshot.sessionId] = {
+              runtimeInstanceId: 'bound',
+              generation: 0,
+              workspacePath: event.snapshot.workspacePath,
+              sessionId: event.snapshot.sessionId,
+              phase: event.snapshot.isStreaming ? 'running' : 'idle',
+              snapshot: event.snapshot
+            }
+          return next
+        })
+        setSessions((current) => {
+          const temporary = current.find(
+            (session) => session.id === event.temporarySessionId
+          )
+          const replacement =
+            event.session ??
+            (event.snapshot.sessionId && temporary
+              ? {
+                  ...temporary,
+                  id: event.snapshot.sessionId,
+                  path: event.snapshot.sessionPath ?? temporary.path,
+                  status: 'pending' as const
+                }
+              : event.snapshot.sessionId && event.snapshot.workspacePath
+                ? {
+                    id: event.snapshot.sessionId,
+                    workspaceId:
+                      overviewRef.current.workspaces.find(
+                        (workspace) =>
+                          workspace.path === event.snapshot.workspacePath
+                      )?.id ?? '',
+                    path:
+                      event.snapshot.sessionPath ??
+                      `session:${event.snapshot.sessionId}`,
+                    title: event.snapshot.sessionName ?? '新对话',
+                    createdAt: new Date().toISOString(),
+                    modifiedAt: new Date().toISOString(),
+                    messageCount: 1,
+                    size: 0,
+                    pinned: false,
+                    archived: false,
+                    compatibility: 'v3' as const,
+                    status: 'pending' as const
+                  }
+                : undefined)
+          return replacement
+            ? [
+                replacement,
+                ...current.filter(
+                  (session) =>
+                    session.id !== event.temporarySessionId &&
+                    session.id !== replacement.id
+                )
+              ]
+            : current.filter(
+                (session) => session.id !== event.temporarySessionId
+              )
+        })
+        if (!event.session && activeWorkspaceIdRef.current)
+          void refreshSessions(
+            activeWorkspaceIdRef.current,
+            0,
+            sessionSearchRef.current
+          )
+        if (
+          temporarySessionIdRef.current === event.temporarySessionId &&
+          event.active
+        ) {
+          setTemporarySession(false)
+          setTemporarySessionId(undefined)
+          skipHistoryRestoreKey.current = newKey
+          applySnapshot(event.snapshot, true)
+          if (cached) setProjection(cached)
+        }
+      }
+      if (event.type === 'temporary-session-failed') {
+        const workspacePath = temporaryWorkspacePaths.current.get(
+          event.temporarySessionId
+        )
+        const key = workspacePath
+          ? `${workspacePath}:${event.temporarySessionId}`
+          : undefined
+        const removeOptimistic = (
+          current: ConversationProjection
+        ): ConversationProjection => {
+          const optimistic = [...current.turns]
+            .reverse()
+            .find(
+              (turn) =>
+                turn.role === 'user' && turn.id.startsWith('optimistic-user-')
+            )
+          return optimistic
+            ? removeConversationTurn(current, optimistic.id)
+            : current
+        }
+        if (key) {
+          const cached = projectionCache.current.get(key)
+          if (cached) projectionCache.current.set(key, removeOptimistic(cached))
+        }
+        const isActive =
+          temporarySessionIdRef.current === event.temporarySessionId
+        if (event.reason !== 'cancelled')
+          setSessionRuntimeStates((current) => ({
+            ...current,
+            [event.temporarySessionId]: {
+              runtimeInstanceId: `failed:${event.temporarySessionId}`,
+              generation: 0,
+              workspacePath,
+              sessionId: event.temporarySessionId,
+              phase: 'failed',
+              temporary: true,
+              snapshot: {
+                status: 'failed',
+                ...(workspacePath ? { workspacePath } : {}),
+                sessionId: event.temporarySessionId,
+                isStreaming: false,
+                queuedMessageCount: 0,
+                error: event.error
+              }
+            }
+          }))
+        if (isActive) setProjection((current) => removeOptimistic(current))
+        const composerEmpty =
+          !composerInputRef.current &&
+          referencesRef.current.length === 0 &&
+          attachmentsRef.current.length === 0
+        if (isActive && composerEmpty) {
+          updateComposer(event.input.message)
+          setReferences(event.input.references ?? [])
+          setAttachments(event.input.images ?? [])
+        } else {
+          setRecoveries((current) => ({
+            ...current,
+            [event.temporarySessionId]: {
+              input: event.input,
+              reason: event.reason
+            }
+          }))
+        }
+      }
       if (event.type === 'workspace-activation-failed')
         setSessionError(event.error.message)
       if (event.type === 'provider-login') setLoginState(event.state)
@@ -1178,6 +1615,69 @@ export function App(): React.JSX.Element {
         type: string
         [key: string]: unknown
       }): void => {
+        const routing = ompEvent['__desktop']
+        const routedSessionId =
+          routing && typeof routing === 'object' && !Array.isArray(routing)
+            ? (routing as { sessionId?: unknown }).sessionId
+            : undefined
+        const routedWorkspacePath =
+          routing && typeof routing === 'object' && !Array.isArray(routing)
+            ? (routing as { workspacePath?: unknown }).workspacePath
+            : undefined
+        if (
+          typeof routedSessionId === 'string' &&
+          routedSessionId !== runtimeRef.current.sessionId
+        ) {
+          if (ompEvent.type === 'runtime_interrupted') {
+            const input = ompEvent['input']
+            if (input && typeof input === 'object' && !Array.isArray(input))
+              setRecoveries((current) => ({
+                ...current,
+                [routedSessionId]: {
+                  input: input as PromptInput,
+                  reason: 'runtime-crashed'
+                }
+              }))
+          }
+          if (typeof routedWorkspacePath === 'string') {
+            const key = `${routedWorkspacePath}:${routedSessionId}`
+            const current =
+              projectionCache.current.get(key) ?? createConversationProjection()
+            projectionCache.current.set(key, reduceOmpEvent(current, ompEvent))
+          }
+          if (
+            ompEvent.type === 'agent_end' ||
+            ompEvent.type === 'session_info_update'
+          ) {
+            if (ompEvent.type === 'agent_end') {
+              setSessions((current) =>
+                current.map((session) =>
+                  session.id === routedSessionId
+                    ? { ...session, unreadCompletion: true }
+                    : session
+                )
+              )
+              setOverview((current) => ({
+                ...current,
+                workspaces: current.workspaces.map((workspace) =>
+                  workspace.path === routedWorkspacePath
+                    ? { ...workspace, unreadCompletion: true }
+                    : workspace
+                )
+              }))
+            }
+            const workspaceId = activeWorkspaceIdRef.current
+            if (workspaceId)
+              void refreshSessions(
+                workspaceId,
+                0,
+                sessionSearchRef.current,
+                false,
+                true
+              )
+          }
+          return
+        }
         const temporaryCreationRunning =
           temporarySessionRef.current &&
           runtimeRef.current.isStreaming &&
@@ -1192,7 +1692,25 @@ export function App(): React.JSX.Element {
             !Array.isArray(input) &&
             typeof (input as { message?: unknown }).message === 'string'
           ) {
-            updateComposer((input as { message: string }).message)
+            const restored = input as PromptInput
+            const currentSessionId = runtimeRef.current.sessionId
+            const composerEmpty =
+              !composerInputRef.current &&
+              referencesRef.current.length === 0 &&
+              attachmentsRef.current.length === 0
+            if (composerEmpty) {
+              updateComposer(restored.message)
+              setReferences(restored.references ?? [])
+              setAttachments(restored.images ?? [])
+            } else if (currentSessionId) {
+              setRecoveries((current) => ({
+                ...current,
+                [currentSessionId]: {
+                  input: restored,
+                  reason: 'runtime-crashed'
+                }
+              }))
+            }
           }
           return
         }
@@ -1242,7 +1760,13 @@ export function App(): React.JSX.Element {
             ompEvent.type === 'session_info_update') &&
           workspaceId
         ) {
-          void refreshSessions(workspaceId, 0, sessionSearchRef.current)
+          void refreshSessions(
+            workspaceId,
+            0,
+            sessionSearchRef.current,
+            false,
+            true
+          )
         }
         if (!knownOmpEventTypes.has(ompEvent.type)) {
           window.desktop.log({
@@ -1296,6 +1820,48 @@ export function App(): React.JSX.Element {
     )
     return () => window.clearTimeout(timer)
   }, [activeWorkspaceId, refreshSessions, sessionSearch])
+
+  useEffect(() => {
+    const workspace = overview.workspaces.find(
+      (item) => item.id === activeWorkspaceId
+    )
+    if (!workspace) return
+    const temporaryStates = Object.values(sessionRuntimeStates).filter(
+      (state) =>
+        state.temporary &&
+        state.sessionId &&
+        state.workspacePath === workspace.path
+    )
+    if (temporaryStates.length === 0) return
+    const timer = window.setTimeout(() => {
+      const now = new Date().toISOString()
+      setSessions((current) => {
+        const existing = new Set(current.map((session) => session.id))
+        const missing = temporaryStates.flatMap((state) =>
+          state.sessionId && !existing.has(state.sessionId)
+            ? [
+                {
+                  id: state.sessionId,
+                  workspaceId: workspace.id,
+                  path: `temporary:${state.sessionId}`,
+                  title: state.snapshot.sessionName ?? '新对话',
+                  createdAt: now,
+                  modifiedAt: now,
+                  messageCount: 1,
+                  size: 0,
+                  pinned: false,
+                  archived: false,
+                  compatibility: 'v3' as const,
+                  status: 'pending' as const
+                }
+              ]
+            : []
+        )
+        return missing.length ? [...missing, ...current] : current
+      })
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [activeWorkspaceId, overview.workspaces, sessionRuntimeStates])
 
   useEffect(() => {
     if (temporarySession || !activeWorkspaceId || !runtime.sessionId) return
@@ -1362,7 +1928,7 @@ export function App(): React.JSX.Element {
         const restored = projectHistory(result.data)
         setProjection(restored)
         projectionCache.current.set(currentProjectionKey, restored)
-        while (projectionCache.current.size > 2) {
+        while (projectionCache.current.size > 12) {
           const oldest = projectionCache.current.keys().next().value as
             string | undefined
           if (oldest) projectionCache.current.delete(oldest)
@@ -1392,6 +1958,7 @@ export function App(): React.JSX.Element {
         const { workspace, snapshot } = result.data
         resetSessionsForWorkspaceChange()
         setTemporarySession(false)
+        setTemporarySessionId(undefined)
         setTemporaryApprovalMode('yolo')
         setComposerInput('')
         setReferences([])
@@ -1428,6 +1995,7 @@ export function App(): React.JSX.Element {
         return
       }
       setTemporarySession(false)
+      setTemporarySessionId(undefined)
       setTemporaryApprovalMode('yolo')
       setComposerInput('')
       setReferences([])
@@ -1443,6 +2011,31 @@ export function App(): React.JSX.Element {
   }
 
   const switchSession = async (sessionId: string): Promise<void> => {
+    if (sessionId.startsWith('temporary-')) {
+      const currentCacheKey = runtimeSessionKey(runtime)
+      if (currentCacheKey)
+        projectionCache.current.set(currentCacheKey, projectionRef.current)
+      const workspacePath =
+        temporaryWorkspacePaths.current.get(sessionId) ?? runtime.workspacePath
+      const targetKey = workspacePath
+        ? `${workspacePath}:${sessionId}`
+        : sessionId
+      setProjection(
+        projectionCache.current.get(targetKey) ?? createConversationProjection()
+      )
+      setTemporarySession(true)
+      setTemporarySessionId(sessionId)
+      setOpeningSession(false)
+      setComposerInput('')
+      setReferences([])
+      setAttachments(attachmentCache.current.get(targetKey) ?? [])
+      if (sessionRuntimeStates[sessionId]) {
+        const result = await window.desktop.selectTemporarySession(sessionId)
+        if (!result.ok && result.error.code !== 'SESSION_NOT_FOUND')
+          setSessionError(result.error.message)
+      }
+      return
+    }
     if (!temporarySession && runtime.sessionId === sessionId) return
     const currentCacheKey = runtimeSessionKey(runtime)
     if (currentCacheKey)
@@ -1466,12 +2059,21 @@ export function App(): React.JSX.Element {
       return
     }
     setTemporarySession(false)
+    setTemporarySessionId(undefined)
     temporaryBaseSessionIdRef.current = undefined
     setTemporaryApprovalMode('yolo')
     if (temporarySession) setComposerInput('')
     setRecentReferences([])
     setAttachments(attachmentCache.current.get(targetCacheKey) ?? [])
     applySnapshot(result.data)
+    setSessions((current) =>
+      current.map((session) =>
+        session.id === sessionId
+          ? { ...session, unreadCompletion: false }
+          : session
+      )
+    )
+    void refreshWorkspaces()
     setSessionError(null)
     if (cached) setProjection(cached)
   }
@@ -1529,6 +2131,7 @@ export function App(): React.JSX.Element {
                     applySnapshot(detached.data)
                     temporaryBaseSessionIdRef.current = detached.data.sessionId
                     setTemporarySession(true)
+                    setTemporarySessionId(undefined)
                     setOpeningSession(false)
                     setTemporaryApprovalMode('yolo')
                     setComposerInput('')
@@ -1573,6 +2176,7 @@ export function App(): React.JSX.Element {
                   if (!alternative) {
                     temporaryBaseSessionIdRef.current = left.data.sessionId
                     setTemporarySession(true)
+                    setTemporarySessionId(undefined)
                     setOpeningSession(false)
                     setTemporaryApprovalMode('yolo')
                     setComposerInput('')
@@ -1611,12 +2215,9 @@ export function App(): React.JSX.Element {
               void refreshWorkspaces(next)
             }}
             onNewSession={() => {
-              if (runtime.isStreaming || runtime.queuedMessageCount > 0) {
-                setSessionError('请先 Stop 当前任务')
-                return
-              }
               temporaryBaseSessionIdRef.current = runtimeRef.current.sessionId
               setTemporarySession(true)
+              setTemporarySessionId(undefined)
               setOpeningSession(false)
               setTemporaryApprovalMode('yolo')
               setComposerInput('')
@@ -1653,7 +2254,13 @@ export function App(): React.JSX.Element {
             }}
             onSearch={setSessionSearch}
             onSwitchSession={(id) => void switchSession(id)}
+            onStopSession={(id) => {
+              void window.desktop.stopSession(id).then((result) => {
+                if (!result.ok) setSessionError(result.error.message)
+              })
+            }}
             search={sessionSearch}
+            sessionRuntimeStates={sessionRuntimeStates}
             sessions={sessions}
           />
         </Panel>
@@ -1700,23 +2307,95 @@ export function App(): React.JSX.Element {
             references={references}
             onReferences={setReferences}
             temporarySession={temporarySession}
+            temporarySessionId={temporarySessionId}
+            temporaryRuntimeState={
+              temporarySessionId
+                ? sessionRuntimeStates[temporarySessionId]
+                : undefined
+            }
+            recovery={recoveries[temporarySessionId ?? runtime.sessionId ?? '']}
             temporaryApprovalMode={temporaryApprovalMode}
             onTemporaryApprovalMode={setTemporaryApprovalMode}
-            onSessionCreated={({ snapshot, session }) => {
-              temporaryBaseSessionIdRef.current = undefined
-              setTemporarySession(false)
-              setTemporaryApprovalMode('yolo')
-              skipHistoryRestoreKey.current = runtimeSessionKey(snapshot)
-              applySnapshot(snapshot, true)
-              sessionRequestId.current += 1
-              if (session) {
-                setSessions((current) => [
-                  session,
-                  ...current.filter((item) => item.id !== session.id)
-                ])
-              } else if (activeWorkspaceId) {
-                void refreshSessions(activeWorkspaceId, 0, sessionSearch)
+            onSessionQueued={(submission, title) => {
+              if (temporaryBindings.current.has(submission.temporarySessionId))
+                return
+              const workspacePath = runtime.workspacePath
+              if (workspacePath)
+                temporaryWorkspacePaths.current.set(
+                  submission.temporarySessionId,
+                  workspacePath
+                )
+              setTemporarySessionId(submission.temporarySessionId)
+              const previousTemporarySessionId = temporarySessionId
+              if (
+                previousTemporarySessionId &&
+                previousTemporarySessionId !== submission.temporarySessionId
+              ) {
+                setSessionRuntimeStates((current) => {
+                  const next = { ...current }
+                  delete next[previousTemporarySessionId]
+                  return next
+                })
+                setRecoveries((current) => {
+                  const next = { ...current }
+                  delete next[previousTemporarySessionId]
+                  return next
+                })
               }
+              const now = new Date().toISOString()
+              if (activeWorkspaceId)
+                setSessions((current) => [
+                  {
+                    id: submission.temporarySessionId,
+                    workspaceId: activeWorkspaceId,
+                    path: `temporary:${submission.temporarySessionId}`,
+                    title,
+                    createdAt: now,
+                    modifiedAt: now,
+                    messageCount: 1,
+                    size: 0,
+                    pinned: false,
+                    archived: false,
+                    compatibility: 'v3',
+                    status: 'pending'
+                  },
+                  ...current.filter(
+                    (item) =>
+                      item.id !== submission.temporarySessionId &&
+                      item.id !== previousTemporarySessionId
+                  )
+                ])
+              if (workspacePath)
+                projectionCache.current.set(
+                  `${workspacePath}:${submission.temporarySessionId}`,
+                  projectionRef.current
+                )
+            }}
+            onPromptAccepted={() => {
+              const sessionId = runtimeRef.current.sessionId
+              if (!sessionId) return
+              setSessions((current) => {
+                const session = current.find((item) => item.id === sessionId)
+                if (!session) return current
+                return [
+                  { ...session, modifiedAt: new Date().toISOString() },
+                  ...current.filter((item) => item.id !== sessionId)
+                ]
+              })
+            }}
+            onRecoveryConsumed={(replacement) => {
+              const recoverySessionId = temporarySessionId ?? runtime.sessionId
+              if (!recoverySessionId) return
+              setRecoveries((current) => {
+                const next = { ...current }
+                if (replacement)
+                  next[recoverySessionId] = {
+                    input: replacement,
+                    reason: 'cancelled'
+                  }
+                else delete next[recoverySessionId]
+                return next
+              })
             }}
             openingSession={openingSession}
             recentReferences={recentReferences}

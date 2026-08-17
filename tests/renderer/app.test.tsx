@@ -412,7 +412,7 @@ describe('App shell', () => {
     fireEvent.change(composer, { target: { value: '补充测试' } })
     fireEvent.keyDown(composer, { key: 'Enter' })
     await waitFor(() =>
-      expect(window.desktop.followUp).toHaveBeenCalledWith({
+      expect(window.desktop.followUp).toHaveBeenCalledWith('session-1', {
         message: '补充测试',
         references: []
       })
@@ -481,7 +481,7 @@ describe('App shell', () => {
 
     fireEvent.keyDown(composer, { key: 'Enter' })
     await waitFor(() =>
-      expect(window.desktop.prompt).toHaveBeenCalledWith({
+      expect(window.desktop.prompt).toHaveBeenCalledWith('session-1', {
         message: '/beta',
         references: []
       })
@@ -592,7 +592,7 @@ describe('App shell', () => {
 
     fireEvent.keyDown(composer, { key: 'Enter', keyCode: 13 })
     await waitFor(() =>
-      expect(window.desktop.prompt).toHaveBeenCalledWith({
+      expect(window.desktop.prompt).toHaveBeenCalledWith('session-1', {
         message: '中文输入',
         references: []
       })
@@ -634,6 +634,14 @@ describe('App shell', () => {
   })
 
   it('新建按钮先打开临时输入，首条发送时才创建真实 Session', async () => {
+    let runtimeListener:
+      Parameters<typeof window.desktop.onRuntimeEvent>[0] | undefined
+    vi.mocked(window.desktop.onRuntimeEvent).mockImplementationOnce(
+      (listener) => {
+        runtimeListener = listener
+        return vi.fn()
+      }
+    )
     const createdSession = {
       id: 'new-session',
       workspaceId: 'workspace-1',
@@ -710,6 +718,78 @@ describe('App shell', () => {
         selector: '[data-role="user"] *'
       })
     ).toBeInTheDocument()
+    act(() => {
+      runtimeListener?.({
+        type: 'pool-snapshot',
+        states: [
+          {
+            runtimeInstanceId: 'temporary:temporary-new-session',
+            generation: 0,
+            workspacePath: '/tmp/workspace',
+            sessionId: 'temporary-new-session',
+            phase: 'queued',
+            queuePosition: 2,
+            temporary: true,
+            visible: true,
+            temporaryInput: { message: '第一条消息', references: [] },
+            snapshot: {
+              status: 'stopped',
+              workspacePath: '/tmp/workspace',
+              sessionId: 'temporary-new-session',
+              sessionName: '第一条消息',
+              isStreaming: false,
+              queuedMessageCount: 0
+            }
+          }
+        ]
+      })
+    })
+    expect(
+      await screen.findByText('等待 Runtime · 队列位置 2')
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '取消等待' }))
+    await waitFor(() =>
+      expect(window.desktop.cancelQueuedSession).toHaveBeenCalledWith(
+        'temporary-new-session'
+      )
+    )
+    fireEvent.change(screen.getByRole('textbox', { name: '任务输入' }), {
+      target: { value: '下一条草稿' }
+    })
+    act(() => {
+      runtimeListener?.({
+        type: 'temporary-session-failed',
+        temporarySessionId: 'temporary-new-session',
+        input: {
+          message: '第一条消息',
+          references: [
+            {
+              id: 'file:a.ts',
+              kind: 'file',
+              name: 'a.ts',
+              relativePath: 'a.ts'
+            }
+          ],
+          images: [{ type: 'image', mimeType: 'image/png', data: 'aW1hZ2U=' }]
+        },
+        error: {
+          code: 'RUNTIME_NOT_READY',
+          message: '已取消等待',
+          retryable: false
+        },
+        reason: 'cancelled'
+      })
+    })
+    expect(screen.getByRole('textbox', { name: '任务输入' })).toHaveValue(
+      '下一条草稿'
+    )
+    expect(screen.getByText('已取消的消息')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '恢复到输入框' }))
+    expect(screen.getByRole('textbox', { name: '任务输入' })).toHaveValue(
+      '第一条消息'
+    )
+    expect(screen.getByText('图片 1')).toBeInTheDocument()
+    expect(screen.getByText('a.ts')).toBeInTheDocument()
   })
 
   it('临时新会话忽略旧会话迟到的历史和 Runtime 快照，显式切回后才恢复', async () => {
@@ -998,28 +1078,357 @@ describe('App shell', () => {
       })
     })
 
-    expect(screen.getByText('检查新会话')).toBeInTheDocument()
+    expect(
+      screen.getByText('检查新会话', {
+        selector: '[data-role="user"] *'
+      })
+    ).toBeInTheDocument()
     expect(screen.getByText('正在处理新会话')).toBeInTheDocument()
     await act(async () => {
       finishCreate?.({
         ok: true,
         data: {
-          snapshot: {
-            status: 'ready',
-            workspacePath: '/tmp/workspace',
-            sessionId: 'new-session',
-            isStreaming: true,
-            queuedMessageCount: 0
-          }
+          temporarySessionId: 'temporary-new-session'
         }
       })
     })
+    act(() => {
+      runtimeListener?.({
+        type: 'temporary-session-bound',
+        temporarySessionId: 'temporary-new-session',
+        snapshot: {
+          status: 'ready',
+          workspacePath: '/tmp/workspace',
+          sessionId: 'new-session',
+          isStreaming: true,
+          queuedMessageCount: 0
+        },
+        active: true
+      })
+    })
 
-    expect(screen.getByText('检查新会话')).toBeInTheDocument()
+    expect(
+      screen.getByText('检查新会话', {
+        selector: '[data-role="user"] *'
+      })
+    ).toBeInTheDocument()
     expect(screen.getByText('正在处理新会话')).toBeInTheDocument()
     expect(screen.queryByText('Session 不存在')).not.toBeInTheDocument()
     await waitFor(() =>
       expect(window.desktop.listSessions).toHaveBeenCalledTimes(2)
     )
+  })
+
+  it('Renderer 重载后从 Pool Snapshot 恢复后台 Session 的待处理交互', async () => {
+    let runtimeListener:
+      Parameters<typeof window.desktop.onRuntimeEvent>[0] | undefined
+    vi.mocked(window.desktop.onRuntimeEvent).mockImplementationOnce(
+      (listener) => {
+        runtimeListener = listener
+        return vi.fn()
+      }
+    )
+    vi.mocked(window.desktop.getWorkspaces).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        activeWorkspaceId: 'workspace-1',
+        workspaces: [
+          {
+            id: 'workspace-1',
+            path: '/tmp/workspace',
+            name: 'workspace',
+            available: true,
+            pinned: false,
+            addedAt: '2026-01-01T00:00:00.000Z',
+            lastUsedAt: '2026-01-01T00:00:00.000Z'
+          }
+        ],
+        hasMore: false
+      }
+    })
+    const history = {
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: '请修改文件' }] },
+        {
+          role: 'assistant',
+          id: 'assistant-1',
+          stopReason: 'toolUse',
+          content: [{ type: 'toolCall', id: 'tool-1', name: 'write' }]
+        }
+      ]
+    }
+    vi.mocked(window.desktop.getRuntimeState).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        status: 'ready',
+        workspacePath: '/tmp/workspace',
+        sessionId: 'session-1',
+        isStreaming: true,
+        queuedMessageCount: 0
+      }
+    })
+    vi.mocked(window.desktop.getMessages).mockResolvedValue({
+      ok: true,
+      data: history
+    })
+    vi.mocked(window.desktop.getSessionMessages).mockResolvedValueOnce({
+      ok: true,
+      data: history
+    })
+    vi.mocked(window.desktop.listSessions).mockResolvedValue({
+      ok: true,
+      data: {
+        sessions: [
+          {
+            id: 'session-1',
+            workspaceId: 'workspace-1',
+            path: '/tmp/session-1.jsonl',
+            title: '修改文件',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            modifiedAt: '2026-01-01T00:00:00.000Z',
+            messageCount: 2,
+            size: 1,
+            pinned: false,
+            archived: false,
+            compatibility: 'v3',
+            status: 'pending'
+          }
+        ],
+        hasMore: false,
+        nextOffset: 0
+      }
+    })
+    render(<App />)
+    await waitFor(() => expect(window.desktop.getMessages).toHaveBeenCalled())
+
+    act(() => {
+      runtimeListener?.({
+        type: 'pool-snapshot',
+        states: [
+          {
+            runtimeInstanceId: 'runtime-1',
+            generation: 2,
+            workspacePath: '/tmp/workspace',
+            sessionId: 'session-1',
+            phase: 'waiting-interaction',
+            visible: true,
+            snapshot: {
+              status: 'ready',
+              workspacePath: '/tmp/workspace',
+              sessionId: 'session-1',
+              isStreaming: true,
+              queuedMessageCount: 0
+            },
+            pendingExtensionUi: [
+              {
+                type: 'extension_ui_request',
+                id: 'runtime-1:2:confirm-1',
+                method: 'confirm',
+                title: '继续执行吗',
+                message: '需要确认后继续'
+              }
+            ]
+          }
+        ]
+      })
+    })
+
+    expect(await screen.findByText('继续执行吗')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '确认' })).toBeInTheDocument()
+    expect(window.desktop.getSessionMessages).toHaveBeenCalledWith('session-1')
+  })
+
+  it('全局等待队列已满时保留新 Session 的输入', async () => {
+    vi.mocked(window.desktop.getWorkspaces).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        activeWorkspaceId: 'workspace-1',
+        workspaces: [
+          {
+            id: 'workspace-1',
+            path: '/tmp/workspace',
+            name: 'workspace',
+            available: true,
+            pinned: false,
+            addedAt: '2026-01-01T00:00:00.000Z',
+            lastUsedAt: '2026-01-01T00:00:00.000Z'
+          }
+        ],
+        hasMore: false
+      }
+    })
+    vi.mocked(window.desktop.getRuntimeState).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        status: 'ready',
+        workspacePath: '/tmp/workspace',
+        sessionId: 'session-1',
+        isStreaming: false,
+        queuedMessageCount: 0
+      }
+    })
+    vi.mocked(window.desktop.createSession).mockResolvedValueOnce({
+      ok: false,
+      error: {
+        code: 'RUNTIME_NOT_READY',
+        message: '等待队列已满，请取消其他任务或等待任务开始',
+        retryable: true
+      }
+    })
+    render(<App />)
+
+    const newButton = await screen.findByRole('button', { name: '新建对话' })
+    await waitFor(() => expect(newButton).toBeEnabled())
+    fireEvent.click(newButton)
+    const composer = screen.getByRole('textbox', { name: '任务输入' })
+    fireEvent.change(composer, { target: { value: '不能丢失的输入' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送' }))
+
+    expect(
+      await screen.findByText('等待队列已满，请取消其他任务或等待任务开始')
+    ).toBeInTheDocument()
+    expect(composer).toHaveValue('不能丢失的输入')
+  })
+
+  it('后台完成和列表刷新不重排，只在成功提交 Prompt 时把 Session 移到顶部', async () => {
+    let runtimeListener:
+      Parameters<typeof window.desktop.onRuntimeEvent>[0] | undefined
+    vi.mocked(window.desktop.onRuntimeEvent).mockImplementationOnce(
+      (listener) => {
+        runtimeListener = listener
+        return vi.fn()
+      }
+    )
+    vi.mocked(window.desktop.getWorkspaces).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        activeWorkspaceId: 'workspace-1',
+        workspaces: [
+          {
+            id: 'workspace-1',
+            path: '/tmp/workspace',
+            name: 'workspace',
+            available: true,
+            pinned: false,
+            addedAt: '2026-01-01T00:00:00.000Z',
+            lastUsedAt: '2026-01-01T00:00:00.000Z'
+          }
+        ],
+        hasMore: false
+      }
+    })
+    vi.mocked(window.desktop.getRuntimeState).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        status: 'ready',
+        workspacePath: '/tmp/workspace',
+        sessionId: 'session-2',
+        isStreaming: false,
+        queuedMessageCount: 0
+      }
+    })
+    const makeSession = (id: string, title: string, modifiedAt: string) => ({
+      id,
+      workspaceId: 'workspace-1',
+      path: `/tmp/${id}.jsonl`,
+      title,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      modifiedAt,
+      messageCount: 1,
+      size: 1,
+      pinned: false,
+      archived: false,
+      compatibility: 'v3' as const,
+      status: 'complete' as const
+    })
+    const first = makeSession(
+      'session-1',
+      '原本在上面',
+      '2026-01-02T00:00:00.000Z'
+    )
+    const second = makeSession(
+      'session-2',
+      '当前会话',
+      '2026-01-01T00:00:00.000Z'
+    )
+    vi.mocked(window.desktop.listSessions)
+      .mockResolvedValueOnce({
+        ok: true,
+        data: { sessions: [first, second], hasMore: false, nextOffset: 0 }
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          sessions: [
+            { ...second, modifiedAt: '2026-01-04T00:00:00.000Z' },
+            { ...first, modifiedAt: '2026-01-03T00:00:00.000Z' }
+          ],
+          hasMore: false,
+          nextOffset: 0
+        }
+      })
+    render(<App />)
+    const firstButton = await screen.findByRole('button', {
+      name: '原本在上面'
+    })
+    const secondButton = screen.getByRole('button', { name: '当前会话' })
+    const appearsBefore = (left: Element, right: Element): boolean =>
+      Boolean(
+        left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING
+      )
+    expect(appearsBefore(firstButton, secondButton)).toBe(true)
+
+    act(() => {
+      runtimeListener?.({
+        type: 'omp-event-batch',
+        events: [
+          {
+            type: 'agent_start',
+            __desktop: {
+              runtimeInstanceId: 'runtime-1',
+              generation: 1,
+              workspacePath: '/tmp/workspace',
+              sessionId: 'session-1'
+            }
+          },
+          {
+            type: 'message_end',
+            message: {
+              id: 'background-answer',
+              role: 'assistant',
+              content: [{ type: 'text', text: '后台回复不应显示' }],
+              stopReason: 'stop'
+            },
+            __desktop: {
+              runtimeInstanceId: 'runtime-1',
+              generation: 1,
+              workspacePath: '/tmp/workspace',
+              sessionId: 'session-1'
+            }
+          },
+          {
+            type: 'agent_end',
+            __desktop: {
+              runtimeInstanceId: 'runtime-1',
+              generation: 1,
+              workspacePath: '/tmp/workspace',
+              sessionId: 'session-1'
+            }
+          }
+        ]
+      })
+    })
+    await waitFor(() =>
+      expect(window.desktop.listSessions).toHaveBeenCalledTimes(2)
+    )
+    expect(appearsBefore(firstButton, secondButton)).toBe(true)
+    expect(screen.queryByText('后台回复不应显示')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('运行已完成，尚未查看')).toBeInTheDocument()
+
+    const composer = screen.getByRole('textbox', { name: '任务输入' })
+    fireEvent.change(composer, { target: { value: '新的 Prompt' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送' }))
+    await waitFor(() => expect(window.desktop.prompt).toHaveBeenCalled())
+    expect(appearsBefore(secondButton, firstButton)).toBe(true)
   })
 })

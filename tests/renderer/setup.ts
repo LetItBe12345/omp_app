@@ -144,6 +144,7 @@ if (typeof window !== 'undefined') {
         }
       }),
       getMessages: vi.fn().mockResolvedValue({ ok: true, data: [] }),
+      getSessionMessages: vi.fn().mockResolvedValue({ ok: true, data: [] }),
       getLoginProviders: vi.fn().mockResolvedValue({ ok: true, data: [] }),
       getAvailableModels: vi.fn().mockResolvedValue({ ok: true, data: [] }),
       getProviderLoginState: vi.fn().mockResolvedValue({
@@ -155,27 +156,20 @@ if (typeof window !== 'undefined') {
       createSession: vi.fn().mockResolvedValue({
         ok: true,
         data: {
-          snapshot: {
-            status: 'ready',
-            workspacePath: '/tmp/workspace',
-            sessionId: 'new-session',
-            isStreaming: true,
-            queuedMessageCount: 0
-          },
-          session: {
-            id: 'new-session',
-            workspaceId: 'workspace-1',
-            path: '/tmp/new-session.jsonl',
-            title: '第一条消息',
-            createdAt: '2026-01-01T00:00:00.000Z',
-            modifiedAt: '2026-01-01T00:00:00.000Z',
-            messageCount: 1,
-            size: 1,
-            pinned: false,
-            archived: false,
-            compatibility: 'v3',
-            status: 'pending'
-          }
+          temporarySessionId: 'temporary-new-session'
+        }
+      }),
+      cancelQueuedSession: vi.fn().mockResolvedValue({
+        ok: true,
+        data: { message: '已取消' }
+      }),
+      selectTemporarySession: vi.fn().mockResolvedValue({
+        ok: true,
+        data: {
+          status: 'ready',
+          workspacePath: '/tmp/workspace',
+          isStreaming: false,
+          queuedMessageCount: 0
         }
       }),
       onRuntimeEvent: vi.fn().mockReturnValue(vi.fn()),

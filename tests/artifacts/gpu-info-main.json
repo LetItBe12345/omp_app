@@ -1,0 +1,52 @@
+{
+  "generatedAt": "2026-07-26T05:13:49.380Z",
+  "electronVersion": "39.8.10",
+  "chromeVersion": "142.0.7444.265",
+  "featureStatus": {
+    "2d_canvas": "enabled",
+    "direct_rendering_display_compositor": "disabled_off_ok",
+    "gpu_compositing": "enabled",
+    "multiple_raster_threads": "enabled_on",
+    "opengl": "enabled_on",
+    "rasterization": "enabled",
+    "raw_draw": "disabled_off_ok",
+    "skia_graphite": "disabled_off",
+    "trees_in_viz": "disabled_off",
+    "video_decode": "enabled",
+    "video_encode": "disabled_software",
+    "vulkan": "disabled_off",
+    "webgl": "enabled",
+    "webgl2": "enabled",
+    "webgpu": "disabled_off",
+    "webnn": "disabled_off"
+  },
+  "gpuInfo": {
+    "auxAttributes": {
+      "amdSwitchable": false,
+      "canSupportThreadedTextureMailbox": false,
+      "glImplementationParts": "(gl=none,angle=none)",
+      "glResetNotificationStrategy": 0,
+      "hardwareSupportsVulkan": false,
+      "inProcessGpu": true,
+      "initializationTime": 0,
+      "isAsan": false,
+      "isClangCoverage": false,
+      "jpegDecodeAcceleratorSupported": false,
+      "optimus": false,
+      "passthroughCmdDecoder": false,
+      "sandboxed": false,
+      "skiaBackendType": "None",
+      "subpixelFontRendering": true,
+      "targetCpuBits": 64,
+      "visibilityCallbackCallCount": 0
+    },
+    "gpuDevice": [
+      {
+        "active": true,
+        "deviceId": 8708,
+        "gpuPreference": 0,
+        "vendorId": 4318
+      }
+    ]
+  }
+}

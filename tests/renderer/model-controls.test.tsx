@@ -27,6 +27,7 @@ const models: AvailableModel[] = [
 
 const runtime: RuntimeSnapshot = {
   status: 'ready',
+  sessionId: 'session-1',
   isStreaming: false,
   queuedMessageCount: 0,
   model: 'test/fake-model',
@@ -130,12 +131,17 @@ describe('ModelControls', () => {
     fireEvent.click(await screen.findByRole('menuitemradio', { name: '标准' }))
 
     await waitFor(() =>
-      expect(window.desktop.setApprovalMode).toHaveBeenCalledWith('write')
+      expect(window.desktop.setApprovalMode).toHaveBeenCalledWith(
+        'session-1',
+        'write'
+      )
     )
   })
 
   it('未选 Session 时显示禁用的全部允许，重复选择不写配置', async () => {
-    renderControls({ runtimeState: { ...runtime, approvalMode: 'yolo' } })
+    renderControls({
+      runtimeState: { ...runtime, sessionId: undefined, approvalMode: 'yolo' }
+    })
     const disabled = screen.getByRole('button', { name: '选择权限' })
     expect(disabled).toBeDisabled()
     expect(disabled).toHaveTextContent('权限：全部允许')
@@ -162,7 +168,7 @@ describe('ModelControls', () => {
     fireEvent.click(await screen.findByText('Reasoning Next'))
 
     await waitFor(() =>
-      expect(window.desktop.selectModel).toHaveBeenCalledWith({
+      expect(window.desktop.selectModel).toHaveBeenCalledWith('session-1', {
         provider: 'test',
         modelId: 'reasoning-next',
         thinkingLevel: 'high'
@@ -180,7 +186,10 @@ describe('ModelControls', () => {
     fireEvent.click(await screen.findByRole('button', { name: '高' }))
 
     await waitFor(() =>
-      expect(window.desktop.setThinkingLevel).toHaveBeenCalledWith('high')
+      expect(window.desktop.setThinkingLevel).toHaveBeenCalledWith(
+        'session-1',
+        'high'
+      )
     )
   })
 
@@ -258,7 +267,7 @@ describe('ModelControls', () => {
     fireEvent.click(screen.getByRole('button', { name: '选择模型' }))
     fireEvent.click(await screen.findByText('First Effort'))
     await waitFor(() =>
-      expect(window.desktop.selectModel).toHaveBeenCalledWith({
+      expect(window.desktop.selectModel).toHaveBeenCalledWith('session-1', {
         provider: 'test',
         modelId: 'first-effort',
         thinkingLevel: 'low'
@@ -360,7 +369,9 @@ describe('ModelControls', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: '取消下次切换' }))
     await waitFor(() =>
-      expect(window.desktop.cancelPendingModelSelection).toHaveBeenCalled()
+      expect(window.desktop.cancelPendingModelSelection).toHaveBeenCalledWith(
+        'session-1'
+      )
     )
   })
 
@@ -433,6 +444,7 @@ describe('ModelControls', () => {
           providerId: 'browser',
           input: {
             id: 'input-1',
+            sessionId: 'session-1',
             message: '输入授权码',
             placeholder: 'authorization code'
           }
@@ -461,6 +473,7 @@ describe('ModelControls', () => {
 
     await waitFor(() =>
       expect(window.desktop.respondExtensionUi).toHaveBeenCalledWith(
+        'session-1',
         'input-1',
         { value: 'secret-code' }
       )

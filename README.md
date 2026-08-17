@@ -23,8 +23,10 @@ OMP Desktop 不是一个新的 IDE。它是 OMP 的图形工作台，让你在�
 - 在独立文件栏中浏览和搜索当前项目，将文件、目录或历史会话加入上下文。
 - 查看流式回答、Thinking、工具执行状态和 Permission 请求。
 - 选择模型、Thinking 等级和执行权限，支持 Stop 与逐条 Follow-up。
+- 在多个 Session 中并行执行 Agent 任务，切换界面不会停止后台任务。
+- 通过 Runtime Pool 限制并行数；达到上限后按提交顺序排队，并支持查看位置和取消。
 - 自动恢复上次 Workspace、会话、草稿和 Runtime 设置。
-- 为 OMP Runtime 单独配置直连、自动代理或手动 HTTP 代理，不要求开启系统全局代理。
+- 为新 Session 设置默认网络，也可为每个 Session 单独选择直连、自动代理或手动 HTTP 代理。
 - 内置固定版本的 OMP Runtime，安装后不再下载应用组件。
 
 ## 安装
@@ -68,22 +70,30 @@ omp-desktop --disable-gpu
 
 该参数只对本次启动生效，不是默认运行方式。
 
+## 当前进度
+
+当前源码版本为 `0.1.2`。Workspace、Session、文件上下文、流式对话、工具审批、模型选择和 Ubuntu 安装包已组成可用的主流程。
+
+最近完成了多 Session 并行 Runtime：每个正在生成的 Session 使用独立 OMP 进程，请求和事件按 Workspace、Session 和 Runtime 实例隔离。默认最多并行 5 个 Session，可在 Settings 中设为 1–10；超出上限的任务进入全局 FIFO 队列。空闲 Runtime 只在 Workspace、网络、权限和环境相容时复用，并会定时回收。
+
+并行 Runtime 已完成单元测试、有头 Electron 真实模型调用和 1/5/10 并行数性能采样，结果见 [Runtime Pool 性能基线](docs/runtime-pool-performance-baseline.md)。当前待完成的主要功能是 Changes / Review / Diff 和内置多标签 Terminal。
+
 ## Roadmap
 
 - [x] Workspace、Session、文件上下文和流式 Agent 对话
 - [x] Tool Call、权限确认、模型选择和 Runtime 代理设置
 - [x] Ubuntu x64 AppImage 和 `.deb` 安装包
+- [x] 多 Session 并行 Runtime、全局任务队列和状态隔离
 - [ ] Changes / Review 面板和按文件查看 Diff
 - [ ] Accept、Revert、Open in Editor 和 `@diff` 上下文
 - [ ] 内置多标签 Terminal
-- [ ] 多 Session 并行运行和任务队列
 - [ ] 应用内文件预览和编辑
 - [ ] Browser Use、页面交互和独立代理环境
 - [ ] Ubuntu Wayland Computer Use
 
 Roadmap 按当前计划排序，不代表固定发布时间。命令和文件操作仍由本地 OMP Runtime 执行，并受当前权限模式控制。
 
-`v0.1.0` 已在 NVIDIA RTX 3090 原生 Wayland 环境完成硬件验收。Intel、AMD 和 X11 真实硬件环境尚未纳入本次正式验收范围。
+`v0.1.0` 已在 NVIDIA RTX 3090 原生 Wayland 环境完成硬件验收。当前 `0.1.2` 源码已完成本地 `.deb` 和 AppImage 构建、校验与覆盖安装。Intel、AMD 和 X11 真实硬件环境尚未纳入正式验收范围。
 
 ## 开发
 

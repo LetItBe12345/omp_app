@@ -1,7 +1,10 @@
 import { spawn } from 'node:child_process'
-import { access } from 'node:fs/promises'
+import { access, mkdtemp, rm } from 'node:fs/promises'
 import { constants } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import process from 'node:process'
+const smokeUserData = await mkdtemp(join(tmpdir(), 'omp-electron-smoke-'))
 const packagedExecutable = process.env.OMP_SMOKE_EXECUTABLE
 const electronBinary = packagedExecutable
   ? undefined
@@ -66,7 +69,8 @@ console.log(
 const child = spawn(command, args, {
   env: {
     ...process.env,
-    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
+    OMP_DESKTOP_SMOKE_USER_DATA: smokeUserData
   },
   stdio: ['ignore', 'pipe', 'pipe'],
   detached: process.platform !== 'win32'
@@ -122,12 +126,14 @@ let timeout = setTimeout(
 
 child.on('error', (error) => {
   clearTimeout(timeout)
+  void rm(smokeUserData, { recursive: true, force: true })
   console.error(`无法启动 Electron smoke：${error.message}`)
   process.exitCode = 1
 })
 
 child.on('exit', (code, signal) => {
   clearTimeout(timeout)
+  void rm(smokeUserData, { recursive: true, force: true })
   const expectedForcedExit = terminatedAfterReady && signal === 'SIGKILL'
   if ((!expectedForcedExit && code !== 0) || !rendererReady) {
     console.error(

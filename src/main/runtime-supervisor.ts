@@ -54,6 +54,10 @@ export type RuntimeSupervisorOptions = {
   stopTimeoutMs?: number
   now?: () => number
   runtimeVersion?: string
+  autoRestartOnCrash?: boolean
+  requestId?: () => string
+  extraRuntimeArgs?: string[]
+  disableAutoRetry?: boolean
 }
 
 const STATE_TIMEOUT_MS = 5_000
@@ -252,7 +256,12 @@ export class RuntimeSupervisor extends EventEmitter {
   #parseErrorTimes: number[] = []
   #recentDiagnostics: string[] = []
   #runtimeVersion?: string
+  readonly #autoRestartOnCrash: boolean
+  readonly #requestId: () => string
+  readonly #extraRuntimeArgs: string[]
+  readonly #disableAutoRetry: boolean
   #versionResolved = false
+  #diagnosticContext?: () => string
   #snapshot: RuntimeSnapshot = {
     status: 'stopped',
     isStreaming: false,
@@ -270,6 +279,10 @@ export class RuntimeSupervisor extends EventEmitter {
     this.#stopTimeoutMs = options.stopTimeoutMs ?? STOP_TIMEOUT_MS
     this.#now = options.now ?? Date.now
     this.#runtimeVersion = options.runtimeVersion
+    this.#autoRestartOnCrash = options.autoRestartOnCrash ?? true
+    this.#requestId = options.requestId ?? randomUUID
+    this.#extraRuntimeArgs = [...(options.extraRuntimeArgs ?? [])]
+    this.#disableAutoRetry = options.disableAutoRetry ?? false
     this.#versionResolved = options.runtimeVersion !== undefined
   }
 
@@ -282,7 +295,11 @@ export class RuntimeSupervisor extends EventEmitter {
   }
 
   recordDiagnostic(message: string): void {
-    this.#diagnostics.write(message)
+    this.#writeDiagnostic(message)
+  }
+
+  setDiagnosticContext(context: () => string): void {
+    this.#diagnosticContext = context
   }
 
   setApprovalState(
@@ -813,7 +830,7 @@ export class RuntimeSupervisor extends EventEmitter {
       )
     }
 
-    const id = randomUUID()
+    const id = this.#requestId()
     const generation = this.#generation
     return new Promise<RpcResponse>((resolve, reject) => {
       const timer =
@@ -822,7 +839,7 @@ export class RuntimeSupervisor extends EventEmitter {
           : setTimeout(() => {
               this.#pending.delete(id)
               const commandType = command['type']
-              this.#diagnostics.write(
+              this.#writeDiagnostic(
                 `RPC_TIMEOUT: command=${typeof commandType === 'string' ? commandType : 'unknown'} generation=${generation}`
               )
               reject(
@@ -894,7 +911,8 @@ export class RuntimeSupervisor extends EventEmitter {
         '--cwd',
         workspacePath,
         '--approval-mode',
-        approvalMode
+        approvalMode,
+        ...this.#extraRuntimeArgs
       ],
       {
         cwd: workspacePath,
@@ -935,6 +953,11 @@ export class RuntimeSupervisor extends EventEmitter {
         { type: 'set_follow_up_mode', mode: 'one-at-a-time' },
         STATE_TIMEOUT_MS
       )
+      if (this.#disableAutoRetry)
+        await this.request(
+          { type: 'set_auto_retry', enabled: false },
+          STATE_TIMEOUT_MS
+        )
       await this.getState()
       this.#publishSnapshots = true
       this.#setSnapshot({})
@@ -986,7 +1009,7 @@ export class RuntimeSupervisor extends EventEmitter {
     child.stderr.setEncoding('utf8')
     child.stderr.on('data', (chunk: string) => {
       if (generation !== this.#generation) return
-      this.#diagnostics.write(chunk)
+      this.#writeDiagnostic(chunk, 'stderr')
       const lines = chunk
         .split(/\r?\n/u)
         .map((line) => redactRuntimeLog(line, 512).trim())
@@ -1028,7 +1051,7 @@ export class RuntimeSupervisor extends EventEmitter {
       const id = frame.id
       const pending = id ? this.#pending.get(id) : undefined
       if (!id || !pending || pending.generation !== generation) {
-        this.#diagnostics.write(
+        this.#writeDiagnostic(
           `忽略无法关联的 RPC 响应: ${redactRuntimeLog(line, 512)}`
         )
         return
@@ -1148,7 +1171,7 @@ export class RuntimeSupervisor extends EventEmitter {
       (timestamp) => now - timestamp <= 10_000
     )
     this.#parseErrorTimes.push(now)
-    this.#diagnostics.write(
+    this.#writeDiagnostic(
       `RPC_PROTOCOL_ERROR: ${redactRuntimeLog(line, 1_024)}`
     )
     this.emit('event', {
@@ -1198,7 +1221,7 @@ export class RuntimeSupervisor extends EventEmitter {
       `OMP Runtime 已退出（code=${String(code)}, signal=${String(signal)}）`,
       true
     )
-    this.#diagnostics.write(failure.message)
+    this.#writeDiagnostic(failure.message)
     this.#rejectPending(failure)
     if (this.#activeInput) {
       this.emit('event', {
@@ -1215,6 +1238,8 @@ export class RuntimeSupervisor extends EventEmitter {
       diagnosticSummary: this.#recentDiagnostics,
       error: failure.toJSON()
     })
+
+    if (!this.#autoRestartOnCrash) return
 
     const workspacePath = this.#snapshot.workspacePath
     const now = this.#now()
@@ -1282,7 +1307,7 @@ export class RuntimeSupervisor extends EventEmitter {
       )
       this.#runtimeVersion = match?.[1]
     } catch (error) {
-      this.#diagnostics.write(
+      this.#writeDiagnostic(
         `读取 OMP 版本失败: ${
           error instanceof Error ? error.message : String(error)
         }`
@@ -1315,7 +1340,7 @@ export class RuntimeSupervisor extends EventEmitter {
       await this.applyPendingModelSelection()
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      this.#diagnostics.write(`待切换模型配置应用失败: ${message}`)
+      this.#writeDiagnostic(`待切换模型配置应用失败: ${message}`)
       this.emit('event', {
         type: 'model_selection_failed',
         message
@@ -1360,5 +1385,11 @@ export class RuntimeSupervisor extends EventEmitter {
       ),
       delay(timeoutMs).then(() => false)
     ])
+  }
+
+  #writeDiagnostic(message: string, eventType = 'runtime'): void {
+    const context = this.#diagnosticContext?.()
+    const prefix = [context, `[event=${eventType}]`].filter(Boolean).join(' ')
+    this.#diagnostics.write(`${prefix} ${message}`)
   }
 }

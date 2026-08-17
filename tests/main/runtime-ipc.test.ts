@@ -14,6 +14,7 @@ function createStateStore(): DesktopStateStore {
       ui: {}
     },
     runtimeNetworkConfig: vi.fn().mockReturnValue({ mode: 'auto' }),
+    sessionNetworkMigrationBaseline: vi.fn().mockReturnValue({ mode: 'auto' }),
     setRuntimeNetworkConfig: vi.fn()
   } as unknown as DesktopStateStore
 }
@@ -168,13 +169,16 @@ describe('registerRuntimeIpc', () => {
 
     const response = await electron.handlers.get(
       IPC_CHANNELS.respondExtensionUi
-    )?.(harness.event, 'input-1', { value: 'private-input-value' })
+    )?.(harness.event, null, 'input-1', { value: 'private-input-value' })
     expect(response).toMatchObject({ ok: true })
-    expect(harness.supervisor.sendFrame).toHaveBeenCalledWith({
-      type: 'extension_ui_response',
-      id: 'input-1',
-      value: 'private-input-value'
-    })
+    expect(harness.supervisor.sendFrame).toHaveBeenCalledWith(
+      {
+        type: 'extension_ui_response',
+        id: 'input-1',
+        value: 'private-input-value'
+      },
+      undefined
+    )
     expect(JSON.stringify(electron.send.mock.calls)).not.toContain(
       'private-input-value'
     )
@@ -378,6 +382,97 @@ describe('registerRuntimeIpc', () => {
     cleanup()
   })
 
+  it('全局同一时间只允许一个 Provider 登录流程', async () => {
+    const { registerRuntimeIpc } = await import('../../src/main/runtime-ipc')
+    const harness = createHarness()
+    let finishLogin: (() => void) | undefined
+    harness.supervisor.loginProvider = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishLogin = resolve
+        })
+    )
+    const cleanup = registerRuntimeIpc(
+      harness.supervisor as unknown as RuntimeSupervisor,
+      createStateStore(),
+      harness.getWindow
+    )
+
+    const first = electron.handlers.get(IPC_CHANNELS.loginProvider)?.(
+      harness.event,
+      'first'
+    ) as Promise<unknown>
+    await expect(
+      electron.handlers.get(IPC_CHANNELS.loginProvider)?.(
+        harness.event,
+        'second'
+      )
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { message: '已有 Provider 正在登录' }
+    })
+    expect(harness.supervisor.loginProvider).toHaveBeenCalledTimes(1)
+    finishLogin?.()
+    await expect(first).resolves.toMatchObject({ ok: true })
+    cleanup()
+  })
+
+  it('当前 Session 正在运行时拒绝 Provider 登录', async () => {
+    const { registerRuntimeIpc } = await import('../../src/main/runtime-ipc')
+    const harness = createHarness()
+    harness.supervisor.snapshot.isStreaming = true
+    const cleanup = registerRuntimeIpc(
+      harness.supervisor as unknown as RuntimeSupervisor,
+      createStateStore(),
+      harness.getWindow
+    )
+
+    await expect(
+      electron.handlers.get(IPC_CHANNELS.loginProvider)?.(
+        harness.event,
+        'provider'
+      )
+    ).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: 'RUNTIME_NOT_READY',
+        message: 'Provider 登录只能在当前 Session 空闲时开始'
+      }
+    })
+    expect(harness.supervisor.loginProvider).not.toHaveBeenCalled()
+    cleanup()
+  })
+
+  it('Provider 登录取消 5 秒未结束时重启发起登录的 Runtime', async () => {
+    vi.useFakeTimers()
+    try {
+      const { registerRuntimeIpc } = await import('../../src/main/runtime-ipc')
+      const harness = createHarness()
+      harness.supervisor.loginProvider = vi.fn(
+        () => new Promise(() => undefined)
+      )
+      const cleanup = registerRuntimeIpc(
+        harness.supervisor as unknown as RuntimeSupervisor,
+        createStateStore(),
+        harness.getWindow
+      )
+      void electron.handlers.get(IPC_CHANNELS.loginProvider)?.(
+        harness.event,
+        'provider'
+      )
+      const cancellation = electron.handlers.get(
+        IPC_CHANNELS.cancelProviderLogin
+      )?.(harness.event) as Promise<unknown>
+
+      await vi.advanceTimersByTimeAsync(5_001)
+      await expect(cancellation).resolves.toMatchObject({ ok: true })
+      expect(harness.supervisor.restartLoginRuntime).toHaveBeenCalledOnce()
+      cleanup()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('执行链未结束时拒绝切换 Session 和 Workspace', async () => {
     const { registerRuntimeIpc } = await import('../../src/main/runtime-ipc')
     const harness = createHarness()
@@ -437,6 +532,9 @@ describe('registerRuntimeIpc', () => {
       },
       addWorkspace: vi.fn().mockResolvedValue(workspace),
       runtimeNetworkConfig: vi.fn().mockReturnValue({ mode: 'auto' }),
+      sessionNetworkMigrationBaseline: vi
+        .fn()
+        .mockReturnValue({ mode: 'auto' }),
       overview: vi.fn().mockReturnValue({
         activeWorkspaceId: workspace.id,
         workspaces: [
@@ -550,7 +648,8 @@ describe('registerRuntimeIpc', () => {
       activateWorkspace: vi.fn().mockResolvedValue(workspace),
       sessionPreference: vi.fn().mockReturnValue({ approvalMode: 'yolo' }),
       clearActiveSessionIfMatches,
-      runtimeNetworkConfig: vi.fn().mockReturnValue({ mode: 'auto' })
+      runtimeNetworkConfig: vi.fn().mockReturnValue({ mode: 'auto' }),
+      sessionNetworkMigrationBaseline: vi.fn().mockReturnValue({ mode: 'auto' })
     } as unknown as DesktopStateStore
     let finishStart: (() => void) | undefined
     harness.supervisor.snapshot = {
@@ -678,6 +777,9 @@ describe('registerRuntimeIpc', () => {
       },
       requireWorkspace: vi.fn().mockReturnValue(workspace),
       runtimeNetworkConfig: vi.fn().mockReturnValue({ mode: 'auto' }),
+      sessionNetworkMigrationBaseline: vi
+        .fn()
+        .mockReturnValue({ mode: 'auto' }),
       updateSessionPreference,
       setActiveSession,
       applyPreferences: vi.fn((_workspaceId, value) => ({
@@ -730,7 +832,7 @@ describe('registerRuntimeIpc', () => {
     expect(updateSessionPreference).toHaveBeenCalledWith(
       workspace.id,
       session.id,
-      { approvalMode: 'yolo' }
+      { approvalMode: 'yolo', network: { mode: 'auto' } }
     )
     expect(setActiveSession).toHaveBeenCalledWith(workspace.id, session.id)
 
@@ -931,6 +1033,7 @@ type HarnessSupervisor = EventEmitter & {
   recordDiagnostic: ReturnType<typeof vi.fn>
   sendFrame: ReturnType<typeof vi.fn>
   loginProvider: ReturnType<typeof vi.fn>
+  restartLoginRuntime: ReturnType<typeof vi.fn>
   prompt: ReturnType<typeof vi.fn>
   start: ReturnType<typeof vi.fn>
   stopCurrentRun: ReturnType<typeof vi.fn>
@@ -960,6 +1063,11 @@ function createHarness(): {
     recordDiagnostic: vi.fn(),
     sendFrame: vi.fn(),
     loginProvider: vi.fn(),
+    restartLoginRuntime: vi.fn().mockResolvedValue({
+      status: 'ready',
+      isStreaming: false,
+      queuedMessageCount: 0
+    }),
     prompt: vi.fn(),
     start: vi.fn(),
     stopCurrentRun: vi.fn(),
