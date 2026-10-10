@@ -1838,7 +1838,9 @@ export function App(): React.JSX.Element {
       setSessions((current) => {
         const existing = new Set(current.map((session) => session.id))
         const missing = temporaryStates.flatMap((state) =>
-          state.sessionId && !existing.has(state.sessionId)
+          state.sessionId &&
+          !temporaryBindings.current.has(state.sessionId) &&
+          !existing.has(state.sessionId)
             ? [
                 {
                   id: state.sessionId,

@@ -34,7 +34,9 @@
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test",
     "smoke": "node scripts/electron-smoke.mjs",
     "benchmark:runtime-startup": "node scripts/runtime-startup-baseline.mjs",
-    "benchmark:runtime-headed": "node scripts/headed-runtime-benchmark.mjs"
+    "benchmark:runtime-headed": "node scripts/headed-runtime-benchmark.mjs",
+    "test:e2e": "pnpm build && playwright test -c tests/e2e/playwright.config.mjs",
+    "test:e2e:report": "playwright show-report tests/artifacts/e2e/report"
   },
   "dependencies": {
     "electron-log": "^5.4.4",
@@ -45,6 +47,7 @@
     "@assistant-ui/react-markdown": "0.14.6",
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@eslint/js": "^9.39.1",
+    "@playwright/test": "^1.64.0",
     "@radix-ui/react-dialog": "^1.1.20",
     "@radix-ui/react-popover": "^1.1.20",
     "@tailwindcss/typography": "^0.5.20",
