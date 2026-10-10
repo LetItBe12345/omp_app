@@ -6,3 +6,4 @@ tests/artifacts/*.png
 .eslintcache
 *.log
 runtime/omp
+tests/artifacts/e2e/
