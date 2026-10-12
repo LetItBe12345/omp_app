@@ -583,6 +583,7 @@ describe('registerRuntimeIpc', () => {
     ])
 
     expect(result).not.toBe('timeout')
+    expect(stateStore.addWorkspace).toHaveBeenCalledWith(workspace.path)
     expect(result).toMatchObject({
       ok: true,
       data: {

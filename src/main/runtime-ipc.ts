@@ -1492,6 +1492,11 @@ export function registerRuntimeIpc(
       )
         assertSwitchAllowed()
       const workspace = await stateStore.addWorkspace(workspacePath)
+      log.info('Workspace 目录选择完成', {
+        selectedPath: workspacePath,
+        canonicalPath: workspace.path,
+        previousPath: currentWorkspacePath
+      })
       const snapshot: RuntimeSnapshot =
         supervisor.snapshot.status === 'ready' &&
         supervisor.snapshot.workspacePath === workspace.path
