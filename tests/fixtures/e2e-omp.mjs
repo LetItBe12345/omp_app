@@ -8,15 +8,20 @@ import {
   readFileSync,
   writeFileSync
 } from 'node:fs'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
+import { homedir, tmpdir } from 'node:os'
 import { createInterface } from 'node:readline'
 
 if (process.argv.includes('--version')) {
   console.log('17.0.6')
   process.exit(0)
 }
-const directory = process.env.OMP_E2E_SESSIONS
 const cwd = process.argv[process.argv.indexOf('--cwd') + 1]
+const directory = join(
+  homedir(),
+  '.omp/agent/sessions',
+  `-tmp-${relative(tmpdir(), cwd).replace(/[/\\:]/gu, '-')}`
+)
 const mode = process.argv[process.argv.indexOf('--approval-mode') + 1]
 let sessionId
 let sessionFile

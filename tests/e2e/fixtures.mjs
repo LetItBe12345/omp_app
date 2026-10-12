@@ -24,6 +24,7 @@ export const test = base.extend({
       '.omp/agent/sessions',
       `-tmp-${relative(tmpdir(), workspace).replace(/[/\\:]/gu, '-')}`
     )
+    const sessionDirectories = [sessions]
     let application
     let page
     const errors = []
@@ -56,7 +57,6 @@ export const test = base.extend({
           SHELL: '/bin/sh',
           XDG_DATA_HOME: join(sessions, 'data'),
           OMP_E2E_ROOT: root,
-          OMP_E2E_SESSIONS: sessions,
           OMP_E2E_RPC_LOG: join(root, 'rpc.jsonl')
         }
       })
@@ -100,7 +100,46 @@ export const test = base.extend({
           .trim()
           .split('\n')
           .map((line) => JSON.parse(line))
-      await use({ application, page, readState, rpc, sessions })
+      const openWorkspace = async (path) => {
+        await mkdir(path, { recursive: true })
+        const directory = join(
+          homedir(),
+          '.omp/agent/sessions',
+          `-tmp-${relative(tmpdir(), path).replace(/[/\\:]/gu, '-')}`
+        )
+        if (!sessionDirectories.includes(directory))
+          sessionDirectories.push(directory)
+        await application.evaluate(({ dialog }, selectedPath) => {
+          dialog.showOpenDialog = async () => ({
+            canceled: false,
+            filePaths: [selectedPath]
+          })
+        }, path)
+        await page
+          .getByRole('button', { name: '打开 Workspace', exact: true })
+          .click()
+        await expect
+          .poll(async () => {
+            const state = await readState()
+            return state.workspaces.find(
+              (item) => item.id === state.activeWorkspaceId
+            )?.path
+          })
+          .toBe(path)
+        await expect(
+          page.getByRole('button', { name: '打开 Workspace', exact: true })
+        ).toBeEnabled()
+      }
+      await use({
+        application,
+        page,
+        readState,
+        rpc,
+        sessions,
+        root,
+        workspace,
+        openWorkspace
+      })
       expect(errors, 'Renderer 不应产生未捕获错误').toEqual([])
     } finally {
       try {
@@ -141,7 +180,11 @@ export const test = base.extend({
           }
         }
       } finally {
-        await rm(sessions, { recursive: true, force: true })
+        await Promise.all(
+          sessionDirectories.map((directory) =>
+            rm(directory, { recursive: true, force: true })
+          )
+        )
         await rm(root, { recursive: true, force: true })
       }
     }

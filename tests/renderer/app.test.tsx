@@ -101,6 +101,74 @@ describe('App shell', () => {
     expect(window.desktop.getRuntimeState).toHaveBeenCalledTimes(1)
   })
 
+  it('重复打开当前 Workspace 保留历史 Session 和未发送输入', async () => {
+    const workspace = {
+      id: 'workspace-current',
+      path: '/tmp/current',
+      name: 'current',
+      available: true,
+      pinned: false,
+      addedAt: '2026-10-12T00:00:00.000Z',
+      lastUsedAt: '2026-10-12T00:00:00.000Z'
+    }
+    const snapshot = {
+      status: 'ready' as const,
+      workspacePath: workspace.path,
+      sessionId: 'history',
+      isStreaming: false,
+      queuedMessageCount: 0
+    }
+    vi.mocked(window.desktop.getWorkspaces).mockResolvedValue({
+      ok: true,
+      data: {
+        activeWorkspaceId: workspace.id,
+        workspaces: [workspace],
+        hasMore: false
+      }
+    })
+    vi.mocked(window.desktop.getRuntimeState).mockResolvedValue({
+      ok: true,
+      data: snapshot
+    })
+    vi.mocked(window.desktop.listSessions).mockResolvedValue({
+      ok: true,
+      data: {
+        sessions: [
+          {
+            id: 'history',
+            workspaceId: workspace.id,
+            path: '/tmp/history.jsonl',
+            title: '原有聊天',
+            createdAt: workspace.addedAt,
+            modifiedAt: workspace.lastUsedAt,
+            messageCount: 2,
+            size: 100,
+            pinned: false,
+            archived: false,
+            compatibility: 'v3',
+            status: 'complete'
+          }
+        ],
+        hasMore: false,
+        nextOffset: 1
+      }
+    })
+    vi.mocked(window.desktop.chooseWorkspace).mockResolvedValue({
+      ok: true,
+      data: { workspace, snapshot }
+    })
+    render(<App />)
+    await screen.findByRole('button', { name: '原有聊天' })
+    const input = screen.getByRole('textbox', { name: '任务输入' })
+    fireEvent.change(input, { target: { value: '未发送内容' } })
+    fireEvent.click(screen.getByRole('button', { name: '打开 Workspace' }))
+    await waitFor(() =>
+      expect(window.desktop.getWorkspaces).toHaveBeenCalledTimes(2)
+    )
+    expect(screen.getByRole('button', { name: '原有聊天' })).toBeInTheDocument()
+    expect(input).toHaveValue('未发送内容')
+  })
+
   it('Runtime 后台启动 ready 后刷新 Provider、模型和思考强度', async () => {
     let runtimeListener:
       Parameters<typeof window.desktop.onRuntimeEvent>[0] | undefined

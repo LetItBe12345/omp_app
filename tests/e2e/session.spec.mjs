@@ -1,4 +1,5 @@
-import { readdir } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { test, expect, submit, completeSession } from './fixtures.mjs'
 
 test('新建 Session：清空对话，首条消息后生成独立会话', async ({ desktop }) => {
@@ -131,4 +132,36 @@ test('删除 Session：取消确认时保留，确认后移除列表、文件和
     )
     .toBeUndefined()
   await expect(page.getByRole('textbox', { name: '任务输入' })).toBeEnabled()
+})
+
+test('重开当前目录、跨 Workspace 和重载后保留历史 Session', async ({
+  desktop
+}) => {
+  const { page, workspace, root, openWorkspace, readState, sessions } = desktop
+  const first = await completeSession(page, '原 Workspace 历史')
+  const before = await readFile(join(sessions, `${first}.jsonl`), 'utf8')
+  const input = page.getByRole('textbox', { name: '任务输入' })
+  await input.fill('未发送草稿')
+  await openWorkspace(workspace)
+  await expect(page.locator(`[data-session-id="${first}"]`)).toBeVisible()
+  await expect(input).toHaveValue('未发送草稿')
+
+  const secondPath = join(root, '另一个工作目录')
+  await openWorkspace(secondPath)
+  await expect(page.locator('[data-session-id]')).toHaveCount(0)
+  await page.getByRole('button', { name: '新建对话', exact: true }).click()
+  const second = await completeSession(page, '另一个 Workspace 历史')
+  expect(second).not.toBe(first)
+  await expect(page.locator(`[data-session-id="${first}"]`)).toHaveCount(0)
+  expect((await readState()).workspaces).toHaveLength(2)
+
+  await openWorkspace(workspace)
+  await expect(page.locator(`[data-session-id="${first}"]`)).toBeVisible()
+  await expect(page.locator(`[data-session-id="${second}"]`)).toHaveCount(0)
+  await page.reload()
+  await expect(page.locator(`[data-session-id="${first}"]`)).toBeVisible()
+  await expect(
+    page.getByText('E2E 命令执行完成', { exact: true })
+  ).toBeVisible()
+  expect(await readFile(join(sessions, `${first}.jsonl`), 'utf8')).toBe(before)
 })

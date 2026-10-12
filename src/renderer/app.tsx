@@ -1958,6 +1958,17 @@ export function App(): React.JSX.Element {
       const result = await window.desktop.chooseWorkspace()
       if (result.ok && result.data) {
         const { workspace, snapshot } = result.data
+        if (workspace.id === activeWorkspaceIdRef.current) {
+          void refreshSessions(
+            workspace.id,
+            0,
+            sessionSearchRef.current,
+            false,
+            true
+          )
+          void refreshWorkspaces()
+          return
+        }
         resetSessionsForWorkspaceChange()
         setTemporarySession(false)
         setTemporarySessionId(undefined)
